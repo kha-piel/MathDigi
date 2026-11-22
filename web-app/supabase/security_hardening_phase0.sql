@@ -1,13 +1,16 @@
 -- Phase 0 security hardening. Run once in the Supabase SQL Editor (as postgres).
 -- Rollback: security_hardening_phase0_rollback.sql.
 --
--- Tables covered (each is skipped with a NOTICE if it or a column it needs is missing):
---   live schema (confirmed by Product Engineer): exams, exam_questions, exam_sections, questions,
---     question_options, question_assets, topics, subjects, student_attempts, attempt_answers,
---     student_answers, student_ai_messages, chat_sessions, chat_messages, user_profiles
---   repo schema (web-app/supabase/*.sql): school_exams, school_exam_sections, school_exam_questions,
---     school_exam_question_options, school_exam_question_assets, student_school_exam_attempts,
---     student_school_exam_answers, student_school_exam_ai_messages
+-- Tables covered. Existence and the columns used below were checked read-only against the live DB
+-- (PostgREST with the anon key); each table is still skipped with a NOTICE if it or a column is missing:
+--   exam content: exams, exam_sections, questions, question_options, question_assets, topics,
+--     subjects, legacy_questions
+--   practice exams: legacy_exams (created_by, exam_type), legacy_exam_questions (exam_id)
+--   student data: student_attempts, legacy_student_attempts, legacy_chat_sessions (user_id);
+--     student_answers, student_ai_messages -> student_attempts.attempt_id;
+--     legacy_attempt_answers -> legacy_student_attempts.attempt_id;
+--     legacy_chat_messages -> legacy_chat_sessions.session_id
+--   user_profiles (user_id, email, role, status)
 --   storage bucket 'school-exams'
 -- For each covered table, every existing policy is copied to public.security_phase0_policy_backup
 -- and dropped, then replaced by the phase0_* policies below (so no old permissive policy survives).
@@ -50,7 +53,7 @@ as $$
     from public.user_profiles
     where user_id = auth.uid()
       and role in ('admin', 'teacher')
-      and coalesce(status, 'active') = 'active'
+      and status = 'active'
   );
 $$;
 
@@ -123,9 +126,8 @@ declare
   t text;
 begin
   foreach t in array array[
-    'exam_sections', 'questions', 'question_options', 'question_assets', 'topics', 'subjects',
-    'school_exams', 'school_exam_sections', 'school_exam_questions',
-    'school_exam_question_options', 'school_exam_question_assets'
+    'exams', 'exam_sections', 'questions', 'question_options', 'question_assets', 'topics',
+    'subjects', 'legacy_questions'
   ] loop
     perform pg_temp.phase0_secure_table(t, array[]::text[], null, array[
       'create policy phase0_read_all on public.%I for select using (true)',
@@ -137,20 +139,20 @@ begin
 end;
 $$;
 
--- exams: students may also create/edit their own custom practice exams (exam-attempt-service.ts).
--- Custom exams are private to their creator; every other exam stays readable by everyone.
-select pg_temp.phase0_secure_table('exams', array['created_by', 'exam_type'], null, array[
+-- legacy_exams: custom practice exams are private to their creator, who may also create/edit them;
+-- every other exam stays readable by everyone and writable by admin/teacher only.
+select pg_temp.phase0_secure_table('legacy_exams', array['created_by', 'exam_type'], null, array[
   'create policy phase0_read on public.%I for select using (exam_type is distinct from ''custom'' or created_by = auth.uid() or public.current_user_is_school_exam_admin())',
   'create policy phase0_insert on public.%I for insert to authenticated with check (public.current_user_is_school_exam_admin() or (created_by = auth.uid() and exam_type = ''custom''))',
   'create policy phase0_update on public.%I for update to authenticated using (public.current_user_is_school_exam_admin() or (created_by = auth.uid() and exam_type = ''custom'')) with check (public.current_user_is_school_exam_admin() or (created_by = auth.uid() and exam_type = ''custom''))',
   'create policy phase0_delete on public.%I for delete to authenticated using (public.current_user_is_school_exam_admin() or (created_by = auth.uid() and exam_type = ''custom''))'
 ]);
 
-select pg_temp.phase0_secure_table('exam_questions', array['exam_id'], 'exams', array[
-  'create policy phase0_read on public.%I for select using (public.current_user_is_school_exam_admin() or exists (select 1 from public.exams e where e.exam_id = exam_questions.exam_id and (e.exam_type is distinct from ''custom'' or e.created_by = auth.uid())))',
-  'create policy phase0_insert on public.%I for insert to authenticated with check (public.current_user_is_school_exam_admin() or exists (select 1 from public.exams e where e.exam_id = exam_questions.exam_id and e.created_by = auth.uid() and e.exam_type = ''custom''))',
-  'create policy phase0_update on public.%I for update to authenticated using (public.current_user_is_school_exam_admin() or exists (select 1 from public.exams e where e.exam_id = exam_questions.exam_id and e.created_by = auth.uid() and e.exam_type = ''custom'')) with check (public.current_user_is_school_exam_admin() or exists (select 1 from public.exams e where e.exam_id = exam_questions.exam_id and e.created_by = auth.uid() and e.exam_type = ''custom''))',
-  'create policy phase0_delete on public.%I for delete to authenticated using (public.current_user_is_school_exam_admin() or exists (select 1 from public.exams e where e.exam_id = exam_questions.exam_id and e.created_by = auth.uid() and e.exam_type = ''custom''))'
+select pg_temp.phase0_secure_table('legacy_exam_questions', array['exam_id'], 'legacy_exams', array[
+  'create policy phase0_read on public.%I for select using (public.current_user_is_school_exam_admin() or exists (select 1 from public.legacy_exams e where e.exam_id = legacy_exam_questions.exam_id and (e.exam_type is distinct from ''custom'' or e.created_by = auth.uid())))',
+  'create policy phase0_insert on public.%I for insert to authenticated with check (public.current_user_is_school_exam_admin() or exists (select 1 from public.legacy_exams e where e.exam_id = legacy_exam_questions.exam_id and e.created_by = auth.uid() and e.exam_type = ''custom''))',
+  'create policy phase0_update on public.%I for update to authenticated using (public.current_user_is_school_exam_admin() or exists (select 1 from public.legacy_exams e where e.exam_id = legacy_exam_questions.exam_id and e.created_by = auth.uid() and e.exam_type = ''custom'')) with check (public.current_user_is_school_exam_admin() or exists (select 1 from public.legacy_exams e where e.exam_id = legacy_exam_questions.exam_id and e.created_by = auth.uid() and e.exam_type = ''custom''))',
+  'create policy phase0_delete on public.%I for delete to authenticated using (public.current_user_is_school_exam_admin() or exists (select 1 from public.legacy_exams e where e.exam_id = legacy_exam_questions.exam_id and e.created_by = auth.uid() and e.exam_type = ''custom''))'
 ]);
 
 -- 3. Student data: owner only (by user_id), admin/teacher may read.
@@ -158,7 +160,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['student_attempts', 'student_school_exam_attempts', 'chat_sessions'] loop
+  foreach t in array array['student_attempts', 'legacy_student_attempts', 'legacy_chat_sessions'] loop
     perform pg_temp.phase0_secure_table(t, array['user_id'], null, array[
       'create policy phase0_owner_select on public.%I for select to authenticated using (user_id = auth.uid() or public.current_user_is_school_exam_admin())',
       'create policy phase0_owner_insert on public.%I for insert to authenticated with check (user_id = auth.uid())',
@@ -176,12 +178,10 @@ declare
 begin
   for child in
     select * from (values
-      ('attempt_answers', 'attempt_id', 'student_attempts', 'attempt_id'),
       ('student_answers', 'attempt_id', 'student_attempts', 'attempt_id'),
       ('student_ai_messages', 'attempt_id', 'student_attempts', 'attempt_id'),
-      ('student_school_exam_answers', 'attempt_id', 'student_school_exam_attempts', 'attempt_id'),
-      ('student_school_exam_ai_messages', 'attempt_id', 'student_school_exam_attempts', 'attempt_id'),
-      ('chat_messages', 'session_id', 'chat_sessions', 'session_id')
+      ('legacy_attempt_answers', 'attempt_id', 'legacy_student_attempts', 'attempt_id'),
+      ('legacy_chat_messages', 'session_id', 'legacy_chat_sessions', 'session_id')
     ) as v(child_table, fk_column, parent_table, parent_key)
   loop
     owner_check := format(
@@ -202,7 +202,7 @@ $$;
 select pg_temp.phase0_secure_table('user_profiles', array['user_id', 'email', 'role', 'status'], null, array[
   'create policy phase0_owner_select on public.%I for select to authenticated using (user_id = auth.uid() or lower(email) = lower(coalesce(auth.jwt() ->> ''email'', '''')))',
   'create policy phase0_owner_update on public.%I for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid())',
-  'create policy phase0_owner_insert on public.%I for insert to authenticated with check (user_id = auth.uid() and role = ''student'' and coalesce(status, ''active'') = ''active'' and (email is null or lower(email) = lower(coalesce(auth.jwt() ->> ''email'', ''''))))'
+  'create policy phase0_owner_insert on public.%I for insert to authenticated with check (user_id = auth.uid() and role = ''student'' and status = ''active'' and (email is null or lower(email) = lower(coalesce(auth.jwt() ->> ''email'', ''''))))'
 ]);
 
 -- Role/status/user_id are privileged; email may only be synced to the caller's auth email.
