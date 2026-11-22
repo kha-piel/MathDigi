@@ -233,6 +233,23 @@ FROM inserted
 JOIN supplemental_math_import AS legacy USING (question_id)
 CROSS JOIN LATERAL jsonb_to_recordset(legacy.options) AS options(option_label text, option_text text, display_order integer);
 
+DO $verify_import$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM supplemental_math_import AS legacy
+    LEFT JOIN public.question_bank AS bank USING (question_id)
+    WHERE bank.topic_id IS NULL
+       OR (SELECT count(*) FROM public.question_bank_options AS options
+           WHERE options.question_id = legacy.question_id) <> 4
+       OR NOT EXISTS (SELECT 1 FROM public.question_bank_options AS options
+                      WHERE options.question_id = legacy.question_id AND options.option_label = bank.correct_answer)
+  ) THEN
+    RAISE EXCEPTION 'Supplemental import has a missing question, topic, option or answer; no rows imported';
+  END IF;
+END
+$verify_import$;
+
 COMMIT;
 `
 }
