@@ -4,6 +4,14 @@ import { limitHistory, useTutorStore, type ChatMessage, type TutorContext } from
 
 type TutorEvent = { type: 'delta'; text: string } | { type: 'done' } | { type: 'error'; message: string }
 
+export function rateLimitMessage(retryAfter: string | null, now = Date.now()) {
+  const value = retryAfter?.trim() ?? ''
+  const seconds = /^\d+$/.test(value) ? Number(value) : (Date.parse(value) - now) / 1000
+  if (!Number.isFinite(seconds) || seconds <= 0) return 'Bạn hỏi quá nhanh. Hãy thử lại sau.'
+  const delay = seconds >= 3600 ? `${Math.ceil(seconds / 3600)} giờ` : seconds >= 60 ? `${Math.ceil(seconds / 60)} phút` : `${Math.ceil(seconds)} giây`
+  return `Bạn hỏi quá nhanh. Hãy thử lại sau khoảng ${delay}.`
+}
+
 export function createSSEParser(onEvent: (event: TutorEvent) => void) {
   let buffer = ''
   return (text: string) => {
@@ -29,7 +37,7 @@ export async function streamTutor(messages: ChatMessage[], context: TutorContext
     body: JSON.stringify({ messages: messages.slice(-12).map((m) => ({ ...m, content: m.content.slice(0, 2000) })), context, reveal_solution: reveal }),
   })
   if (!response.ok) {
-    throw new Error(response.status === 401 ? 'Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.' : response.status === 429 ? `Bạn hỏi quá nhanh. Thử lại sau ${response.headers.get('Retry-After') || '60'} giây.` : response.status >= 500 ? 'Gia sư đang bận. Vui lòng thử lại sau.' : 'Không thể gửi câu hỏi. Hãy kiểm tra nội dung.')
+    throw new Error(response.status === 401 ? 'Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.' : response.status === 429 ? rateLimitMessage(response.headers.get('Retry-After')) : response.status >= 500 ? 'Gia sư đang bận. Vui lòng thử lại sau.' : 'Không thể gửi câu hỏi. Hãy kiểm tra nội dung.')
   }
   if (!response.body) throw new Error('Không nhận được phản hồi từ gia sư.')
   const reader = response.body.getReader()

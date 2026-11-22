@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createSSEParser, loadHistory, persistMessage } from './service'
+import { createSSEParser, loadHistory, persistMessage, rateLimitMessage } from './service'
 import { limitHistory, useTutorStore, TUTOR_EXAM_DISABLED } from './store'
 
 vi.mock('../../lib/supabase/client', () => ({ getSupabaseBrowserClient: () => { throw new Error('table missing') } }))
@@ -58,4 +58,16 @@ it('keeps newest 50 messages, including empty history', () => {
 it('degrades gracefully when history is unavailable', async () => {
   expect(await loadHistory('student')).toEqual([])
   expect(await persistMessage('student', { role: 'user', content: 'x' }, null)).toBe(false)
+})
+
+it.each([null, '', 'unreadable', '-1', '0'])('does not invent a retry delay for %s', (value) => {
+  expect(rateLimitMessage(value)).toBe('Bạn hỏi quá nhanh. Hãy thử lại sau.')
+})
+
+it.each([['30', '30 giây'], ['90', '2 phút'], ['7200', '2 giờ'], ['86400', '24 giờ']])('formats retry delay %s sensibly', (value, delay) => {
+  expect(rateLimitMessage(value)).toBe(`Bạn hỏi quá nhanh. Hãy thử lại sau khoảng ${delay}.`)
+})
+
+it('supports HTTP-date Retry-After headers', () => {
+  expect(rateLimitMessage('Wed, 21 Oct 2015 07:30:00 GMT', Date.parse('Wed, 21 Oct 2015 07:28:00 GMT'))).toContain('2 phút')
 })
