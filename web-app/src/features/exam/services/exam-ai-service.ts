@@ -79,26 +79,31 @@ export async function requestWeaknessAnalysis(items: WeaknessAnalysisItem[]) {
 }
 
 async function requestExplanation(input: ExplainRequest) {
-  if (!env.aiApiBaseUrl) {
-    throw new Error(
-      'Missing VITE_AI_API_BASE_URL. Copy web-app/.env.example to web-app/.env.local before using AI chat.',
-    )
+  try {
+    if (!env.aiApiBaseUrl) {
+      throw new Error('Missing VITE_AI_API_BASE_URL')
+    }
+
+    const response = await callAiEndpoint('/api/explain', {
+      question_content: input.questionContent,
+      student_answer: input.studentAnswer,
+      correct_answer: input.correctAnswer,
+      obsidian_source_path: input.obsidianSourcePath,
+    })
+
+    if (!response.ok) {
+      throw new Error(`AI backend HTTP ${response.status}: ${await response.text()}`)
+    }
+
+    const data = (await response.json()) as ExplainResponse
+    if (data?.status !== 'success' || typeof data.explanation !== 'string' || !data.explanation.trim()) {
+      throw new Error(`Invalid AI response: ${JSON.stringify(data)}`)
+    }
+    return data.explanation
+  } catch (error) {
+    console.error('AI tutor request failed:', error)
+    throw new Error('Gia sư AI đang tạm thời không phản hồi được. Vui lòng thử lại sau.', { cause: error })
   }
-
-  const response = await callAiEndpoint('/api/explain', {
-    question_content: input.questionContent,
-    student_answer: input.studentAnswer,
-    correct_answer: input.correctAnswer,
-    obsidian_source_path: input.obsidianSourcePath,
-  })
-
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(errorText || `AI backend trả về lỗi HTTP ${response.status}.`)
-  }
-
-  const data = (await response.json()) as ExplainResponse
-  return data.explanation
 }
 
 function buildStudentAnswerPayload(prompt: string, selectedAnswer: string, systemPrompt: boolean) {

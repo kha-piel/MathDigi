@@ -417,16 +417,18 @@ def generate_text(prompt: str) -> str:
             contents=prompt,
         )
     except Exception as exc:  # noqa: BLE001
+        logging.getLogger("ai_service.tutor").exception("Gemini explanation request failed")
         raise HTTPException(
-            status_code=500,
-            detail=f"Loi khi goi Gemini API: {str(exc)}",
+            status_code=502,
+            detail="Gia sư AI đang tạm thời không phản hồi được. Vui lòng thử lại sau.",
         ) from exc
 
     text = getattr(response, "text", None)
     if not text:
+        logging.getLogger("ai_service.tutor").error("Gemini returned no explanation text")
         raise HTTPException(
-            status_code=500,
-            detail="Gemini API khong tra ve noi dung text hop le.",
+            status_code=502,
+            detail="Gia sư AI đang tạm thời không phản hồi được. Vui lòng thử lại sau.",
         )
     return text
 
