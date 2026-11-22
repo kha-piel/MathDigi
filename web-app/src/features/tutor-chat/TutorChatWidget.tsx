@@ -41,7 +41,8 @@ function UserTutorChat({ userId }: { userId: string }) {
     if (!previous && !text) return
     const history = previous ?? limitHistory([...messages.filter((m) => m.content.trim()), { role: 'user', content: text }])
     const currentContext = context
-    setInput(''); setError(''); setRetry(null); setBusy(true)
+    if (!previous) setInput('')
+    setError(''); setRetry(null); setBusy(true)
     setMessages(limitHistory([...history, { role: 'assistant', content: '' }]))
     const abort = new AbortController()
     controller.current = abort
