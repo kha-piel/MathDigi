@@ -5,23 +5,23 @@
 --    questions / question_options / question_assets. If phase4 ran before it, the restrictive
 --    phase4_*_visibility policies that hide unpublished imports are gone. Re-create any missing one.
 -- Apply after migrate_phase4_exam_import.sql and security_hardening_phase0.sql (in either order).
--- Rollback: ../rollback/20261122005_phase4_import_admin_active_status_rollback.sql
+-- Rollback: ../rollback/20261122006_phase4_import_admin_active_status_rollback.sql
 begin;
 
-create table if not exists public.security_phase0_005_created_policies (
+create table if not exists public.security_phase0_006_created_policies (
   tablename name not null,
   policyname name not null,
   primary key (tablename, policyname)
 );
-alter table public.security_phase0_005_created_policies enable row level security;
-revoke all on public.security_phase0_005_created_policies from public, anon, authenticated;
+alter table public.security_phase0_006_created_policies enable row level security;
+revoke all on public.security_phase0_006_created_policies from public, anon, authenticated;
 
 do $migration$
 declare
   pol record;
 begin
   if to_regprocedure('public.phase4_can_manage_exam_import()') is null then
-    raise notice '005 phase4_can_manage_exam_import() missing; nothing changed';
+    raise notice '006 phase4_can_manage_exam_import() missing; nothing changed';
     return;
   end if;
 
@@ -50,15 +50,15 @@ begin
     ) as p(tablename, policyname, ddl)
   loop
     if to_regclass(format('public.%I', pol.tablename)) is null then
-      raise notice '005 table % missing; % skipped', pol.tablename, pol.policyname;
+      raise notice '006 table % missing; % skipped', pol.tablename, pol.policyname;
     elsif not exists (
       select 1 from pg_policies
       where schemaname = 'public' and tablename = pol.tablename and policyname = pol.policyname
     ) then
       execute pol.ddl;
-      insert into public.security_phase0_005_created_policies values (pol.tablename, pol.policyname)
+      insert into public.security_phase0_006_created_policies values (pol.tablename, pol.policyname)
         on conflict do nothing;
-      raise notice '005 re-created %.%', pol.tablename, pol.policyname;
+      raise notice '006 re-created %.%', pol.tablename, pol.policyname;
     end if;
   end loop;
 end $migration$;

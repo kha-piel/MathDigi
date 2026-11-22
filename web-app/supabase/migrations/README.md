@@ -19,7 +19,7 @@ psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f web-app/supabase/migrations/202611
 **Before 003/004:** apply `../security_hardening_phase0.sql` first. 003 and 004 reuse
 `current_user_is_school_exam_admin()`; without Phase 0 that helper is the old one from
 `setup_school_exam_admin_policies.sql`, which also grants admin by profile email and to
-anyone signed in as `admin@local.test`. Then apply **005** after both Phase 0 and
+anyone signed in as `admin@local.test`. Then apply **006** after both Phase 0 and
 `../migrate_phase4_exam_import.sql`: it makes the exam-import admin check accept only
 status `active`, and re-creates the phase4 visibility policies (unpublished imports
 hidden from students) if Phase 0 dropped them.
@@ -47,7 +47,7 @@ in SQL Editor. Every file is one transaction.
 
 ## Rollback
 
-Stop writes; apply matching files in `../rollback/` in reverse: **005 → 004 → 003 → 002
+Stop writes; apply matching files in `../rollback/` in reverse: **006 → 005 → 004 → 003 → 002
 → 001**. Rollback 004 refuses a nonempty bank. To explicitly back up its rows to
 `math_only_backup.question_bank_rows` and drop it, set this in the **same session**
 (not a psql variable):
