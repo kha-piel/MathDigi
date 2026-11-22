@@ -496,9 +496,9 @@ export function ExamPage() {
           {chatStatus ? <p className="mb-4 text-sm text-slate-500">{chatStatus}</p> : null}
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-4">
             <strong className="text-sm text-slate-900">Trạng thái câu hiện tại</strong>
-            {questionLocked ? (
+            {questionLocked || isSubmitted ? (
               <MarkdownContent
-                content={`Đã khóa. Đáp án của bạn: ${selectedAnswerLabel}`}
+                content={`${isSubmitted ? 'Đã nộp bài' : 'Đã khóa'}. Đáp án của bạn: ${selectedAnswerLabel}`}
                 className="mt-2 text-slate-600"
               />
             ) : (
