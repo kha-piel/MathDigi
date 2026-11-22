@@ -85,7 +85,7 @@ type CreatedAttemptRow = {
 
 type SchoolExamAttemptRow = {
   attempt_id: string
-  school_exam_id: string
+  exam_id: string
   variant_code: string | null
   score: number | null
   correct_count: number
@@ -175,7 +175,7 @@ export async function persistCompletedSchoolExamAttempt(input: PersistSchoolExam
     .from('student_attempts')
     .insert({
       user_id: input.userId,
-      school_exam_id: input.schoolExamId,
+      exam_id: input.schoolExamId,
       variant_code: input.variantCode,
       score: input.score,
       correct_count: input.correctCount,
@@ -252,7 +252,7 @@ export async function fetchSchoolExamAttemptHistory(
   const supabase = getSupabaseBrowserClient()
   const { data, error } = await supabase
     .from('student_attempts')
-    .select('attempt_id, school_exam_id, variant_code, score, correct_count, wrong_count, skipped_count, total_count, completed_at, exams(title, school_name, subject_name, year)')
+    .select('attempt_id, exam_id, variant_code, score, correct_count, wrong_count, skipped_count, total_count, completed_at, exams(title, school_name, subject_name, year)')
     .eq('user_id', userId)
     .order('completed_at', { ascending: false })
     .returns<SchoolExamAttemptRow[]>()
@@ -270,7 +270,7 @@ export async function fetchSchoolExamAttemptDetail(
   const supabase = getSupabaseBrowserClient()
   const { data, error } = await supabase
     .from('student_attempts')
-    .select('attempt_id, school_exam_id, variant_code, score, correct_count, wrong_count, skipped_count, total_count, completed_at, exams(title, school_name, subject_name, year), student_answers(question_number, question_type, selected_answer, correct_answer, is_correct, question_content, topic), student_ai_messages(message_id, question_number, role, content, created_at)')
+    .select('attempt_id, exam_id, variant_code, score, correct_count, wrong_count, skipped_count, total_count, completed_at, exams(title, school_name, subject_name, year), student_answers(question_number, question_type, selected_answer, correct_answer, is_correct, question_content, topic), student_ai_messages(message_id, question_number, role, content, created_at)')
     .eq('attempt_id', attemptId)
     .maybeSingle<SchoolExamAttemptDetailRow>()
 
@@ -352,15 +352,15 @@ function mapAttemptHistoryRow(row: SchoolExamAttemptRow): SchoolExamAttemptHisto
   const exam = unwrapSingle(row.exams)
   return {
     attemptId: row.attempt_id,
-    schoolExamId: row.school_exam_id,
+    schoolExamId: row.exam_id,
     examTitle: exam
       ? formatSchoolExamDisplayTitle({
-          examId: row.school_exam_id,
+          examId: row.exam_id,
           title: exam.title,
           schoolName: exam.school_name,
         })
       : 'De thi truong',
-    schoolName: exam ? formatSchoolExamDisplaySchoolName(row.school_exam_id, exam.school_name) : '--',
+    schoolName: exam ? formatSchoolExamDisplaySchoolName(row.exam_id, exam.school_name) : '--',
     subjectName: exam?.subject_name ?? '--',
     year: exam?.year ?? null,
     variantCode: row.variant_code ?? '--',
