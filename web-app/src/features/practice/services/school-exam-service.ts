@@ -146,6 +146,9 @@ export async function fetchSchoolExamCatalog(): Promise<PracticeExamCatalogItem[
   return withCacheInvalidation(schoolExamCatalogCache, cacheKey, nextPromise)
 }
 
+// Supplemental question-bank containers share the exams table but are not school exam papers.
+const SUPPLEMENTAL_EXAM_ID_PREFIX = 'supplemental-'
+
 async function fetchSchoolExamCatalogUncached(): Promise<PracticeExamCatalogItem[]> {
   if (!hasSupabaseEnv()) {
     return buildFallbackCatalog()
@@ -158,6 +161,7 @@ async function fetchSchoolExamCatalogUncached(): Promise<PracticeExamCatalogItem
       'exam_id, title, school_name, city, subject_code, subject_name, year, duration_minutes, pdf_url, source_path, tags',
     )
     .eq('is_active', true)
+    .not('exam_id', 'like', `${SUPPLEMENTAL_EXAM_ID_PREFIX}%`)
     .order('year', { ascending: false })
     .order('title', { ascending: true })
     .returns<SchoolExamCatalogRow[]>()
