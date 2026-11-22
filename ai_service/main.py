@@ -450,17 +450,18 @@ def build_exam_id(school_name: str, subject_code: str, year: int, variant_code: 
 
 def parse_answer_key_text(answer_key_text: str) -> dict[int, str]:
     answer_key_text = (answer_key_text or "").strip()
-    markers = [
-        match for match in re.finditer(r"(?<![^\s,;])(\d{1,3})\s*([.:=])\s*", answer_key_text)
-        if match.group(2) != "." or not answer_key_text[:match.start()].rstrip().endswith("|")
-    ]
+    markers = list(re.finditer(
+        r"(?:(?:^|(?<=[,;\r\n]))[ \t]*(\d{1,3})[ \t]*[.:=]"
+        r"|(?<=[ \t])(\d{1,3})[ \t]*(?:[:=]|\.(?!\d)))[ \t]*",
+        answer_key_text,
+    ))
     if markers and markers[0].start() == 0:
         parsed = {}
         for index, marker in enumerate(markers):
             end = markers[index + 1].start() if index + 1 < len(markers) else len(answer_key_text)
             value = answer_key_text[marker.end():end].strip(" ,;\t\n\r")
             if value:
-                parsed[int(marker.group(1))] = value
+                parsed[int(marker.group(1) or marker.group(2))] = value
         return parsed
 
     normalized = answer_key_text.replace("\n", " ")

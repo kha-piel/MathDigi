@@ -100,9 +100,16 @@ class PdfImportTests(unittest.IsolatedAsyncioTestCase):
             ("17: 40; 18: 41", {17: "40", 18: "41"}),
             ("1: A 2: B", {1: "A", 2: "B"}),
             ("17: -0,66 | 0.66 18: 41", {17: "-0,66 | 0.66", 18: "41"}),
+            ("17.40, 18.41", {17: "40", 18: "41"}),
         ):
             with self.subTest(value=value):
                 self.assertEqual(main.parse_answer_key_text(value), expected)
+
+    def test_decimal_answers_are_not_question_markers(self):
+        for answer in ("0.66", "1.5", "1,5", "-2.5"):
+            with self.subTest(answer=answer):
+                self.assertEqual(main.parse_answer_key_text(f"17: {answer}"), {17: answer})
+                self.assertEqual(main.parse_answer_key_text(f"17: {answer} 18: 41"), {17: answer, 18: "41"})
 
     def test_sample_rejects_page_limit(self):
         with TemporaryDirectory() as directory:
