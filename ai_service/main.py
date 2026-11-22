@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -696,14 +696,14 @@ DINH DANG JSON:
 
 def extract_pdf_text(pdf_path: Path) -> tuple[str, list[int]]:
     if fitz is None:
-        raise HTTPException(status_code=503, detail="Trich xuat PDF chua san sang.")
+        raise HTTPException(status_code=503, detail="Dịch vụ trích xuất PDF chưa sẵn sàng.")
 
     try:
         with fitz.open(pdf_path) as document:
             if not document.is_pdf or document.needs_pass or not document.page_count:
-                raise HTTPException(status_code=422, detail="PDF rong, bi khoa hoac khong hop le.")
+                raise HTTPException(status_code=422, detail="PDF rỗng, bị khóa hoặc không hợp lệ.")
             if document.page_count > PDF_MAX_PAGES:
-                raise HTTPException(status_code=413, detail=f"PDF vuot qua {PDF_MAX_PAGES} trang.")
+                raise HTTPException(status_code=413, detail=f"PDF vượt quá {PDF_MAX_PAGES} trang.")
             page_texts = []
             scanned_pages = []
             for page_index, page in enumerate(document, start=1):
@@ -714,7 +714,7 @@ def extract_pdf_text(pdf_path: Path) -> tuple[str, list[int]]:
                     scanned_pages.append(page_index)
             return "\n\n".join(page_texts), scanned_pages
     except (RuntimeError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail="Khong the doc file PDF.") from exc
+        raise HTTPException(status_code=422, detail="Không thể đọc tệp PDF.") from exc
 
 
 def build_pdf_text_exam_prompt(
@@ -768,11 +768,24 @@ def retry_pdf_request(operation):
             return operation()
         except Exception as exc:
             status = getattr(exc, "code", None)
+            if isinstance(exc, errors.APIError) and isinstance(exc.details, dict):
+                provider_error = exc.details.get("error", exc.details)
+                provider_details = provider_error.get("details") if isinstance(provider_error, dict) else None
+                if isinstance(provider_details, list) and any(
+                    isinstance(item, dict) and item.get("reason") == "API_KEY_INVALID" for item in provider_details
+                ):
+                    raise HTTPException(status_code=502, detail={
+                        "code": "AI_PROVIDER_API_KEY_INVALID",
+                        "message": "Gemini từ chối khóa API. Hãy liên hệ quản trị viên để kiểm tra cấu hình khóa.",
+                    }) from exc
             transient = status in {408, 429, 500, 502, 503, 504} or isinstance(exc, (TimeoutError, OSError))
             if transient and attempt < 2:
                 time.sleep(2 ** attempt)
                 continue
-            raise HTTPException(status_code=503 if transient else 502, detail="Dich vu phan tich PDF khong phan hoi. Hay thu lai.") from exc
+            raise HTTPException(
+                status_code=503 if transient else 502,
+                detail="Dịch vụ AI phân tích PDF hiện không khả dụng. Hãy thử lại sau.",
+            ) from exc
 
 
 def analyze_pdf(pdf_path: Path, pdf_name: str, subject_code: str, subject_name: str, answer_key_map: dict[int, str]) -> str:
@@ -811,15 +824,15 @@ def analyze_scanned_pdf(pdf_path: Path, prompt: str) -> str:
         while uploaded_file.state.name == "PROCESSING":
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise HTTPException(status_code=504, detail="OCR PDF qua thoi gian cho.")
+                raise HTTPException(status_code=504, detail="Đã hết thời gian chờ nhận dạng chữ trong PDF.")
             time.sleep(min(2, remaining))
             if time.monotonic() >= deadline:
-                raise HTTPException(status_code=504, detail="OCR PDF qua thoi gian cho.")
+                raise HTTPException(status_code=504, detail="Đã hết thời gian chờ nhận dạng chữ trong PDF.")
             uploaded_file = retry_pdf_request(lambda: pdf_client.files.get(name=name))
             if time.monotonic() >= deadline:
-                raise HTTPException(status_code=504, detail="OCR PDF qua thoi gian cho.")
+                raise HTTPException(status_code=504, detail="Đã hết thời gian chờ nhận dạng chữ trong PDF.")
         if uploaded_file.state.name != "ACTIVE":
-            raise HTTPException(status_code=502, detail="Gemini khong the OCR file PDF nay.")
+            raise HTTPException(status_code=502, detail="Gemini không thể nhận dạng chữ trong tệp PDF này.")
         return generate_import_json([uploaded_file, prompt])
     finally:
         try:
@@ -835,7 +848,7 @@ def generate_import_json(contents: Any) -> str:
         config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0),
     ))
     if not response.text:
-        raise HTTPException(status_code=502, detail="Dich vu phan tich khong tra ve du lieu PDF.")
+        raise HTTPException(status_code=502, detail="Dịch vụ phân tích không trả về dữ liệu PDF.")
     return response.text
 
 
@@ -893,7 +906,7 @@ def normalize_pdf_question(
     has_image = bool(item.get("hasImage", item.get("has_image", False)))
     assets: list[PdfExamAsset] = []
     if has_image:
-        warnings.append("Cau co hinh trong PDF goc. Backend hien chi xu ly text, can giao vien doi chieu neu can.")
+        warnings.append("Câu hỏi có hình trong PDF gốc. Giáo viên nên đối chiếu với hình gốc khi duyệt.")
 
     changes: list[ValidatedExamChange] = []
     raw_changes = item.get("changes")
@@ -917,36 +930,36 @@ def normalize_pdf_question(
     difficulty = item.get("difficultyLevel", item.get("difficulty_level"))
     if type(difficulty) is not int or difficulty not in {1, 2, 3, 4}:
         difficulty = None
-        warnings.append("Can chon muc do tu 1 den 4.")
+        warnings.append("Cần chọn mức độ từ 1 đến 4.")
     is_valid = difficulty is not None
     if not topic:
         is_valid = False
-        warnings.append("Can chon chuyen de cho cau hoi.")
+        warnings.append("Cần chọn chuyên đề cho câu hỏi.")
     if not question_text:
         is_valid = False
-        warnings.append("Thieu de bai.")
+        warnings.append("Thiếu đề bài.")
 
     if question_type == "multiple_choice":
         missing_options = [option.label for option in options if not option.text]
         if missing_options:
             is_valid = False
-            warnings.append(f"Thieu dap an {', '.join(missing_options)}.")
+            warnings.append(f"Thiếu đáp án {', '.join(missing_options)}.")
         if correct_answer.upper() not in {"A", "B", "C", "D"}:
             is_valid = False
-            warnings.append("Thieu hoac sai dap an dung A/B/C/D.")
+            warnings.append("Đáp án đúng A/B/C/D bị thiếu hoặc không hợp lệ.")
         correct_answer = correct_answer.upper()
     elif question_type == "true_false":
         if len(statements) < 4:
             is_valid = False
-            warnings.append("Thieu menh de dung/sai a,b,c,d.")
+            warnings.append("Thiếu mệnh đề đúng/sai a, b, c, d.")
         if not re.fullmatch(r"[DS]{4}", correct_answer.upper()):
             is_valid = False
-            warnings.append("Thieu hoac sai dap an dung/sai dang DDSS.")
+            warnings.append("Đáp án đúng/sai dạng DDSS bị thiếu hoặc không hợp lệ.")
         correct_answer = correct_answer.upper()
     else:
         if not re.fullmatch(r"[+-]?[0-9]+(?:[.,][0-9]+)?(?:\s*\|\s*[+-]?[0-9]+(?:[.,][0-9]+)?)*", correct_answer):
             is_valid = False
-            warnings.append("Dap an tra loi ngan phai la so.")
+            warnings.append("Đáp án trả lời ngắn phải là số.")
 
     return PdfExamQuestion(
         difficulty_level=difficulty,
@@ -1015,7 +1028,7 @@ def normalize_pdf_exam_response(
 
     warnings = normalize_warning_list(payload.get("warnings", []))
     if not questions:
-        warnings.append("Gemini khong trich xuat duoc cau hoi nao tu PDF.")
+        warnings.append("Gemini không trích xuất được câu hỏi nào từ PDF.")
 
     duplicate_numbers = [
         question.question_number
@@ -1023,7 +1036,7 @@ def normalize_pdf_exam_response(
         if [item.question_number for item in questions].count(question.question_number) > 1
     ]
     if duplicate_numbers:
-        warnings.append("Co questionNumber bi trung lap, can giao vien kiem tra lai.")
+        warnings.append("Có số câu hỏi bị trùng. Giáo viên cần kiểm tra lại.")
 
     is_valid = bool(questions) and not any(not question.is_valid for question in questions)
     return PdfExamValidateResponse(
@@ -1430,7 +1443,7 @@ async def validate_exam_pdf(
     answer_key_text: str = Form(default="", alias="answerKeyText"),
 ):
     if not pdf_file.filename or not pdf_file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Chi ho tro file PDF.")
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ tệp PDF.")
 
     cleaned_subject_code = subject_code.strip().upper()
     cleaned_subject_name = subject_name.strip()
@@ -1439,30 +1452,30 @@ async def validate_exam_pdf(
     cleaned_variant_code = variant_code.strip()
 
     if cleaned_subject_code not in {"TOAN", "VAT_LY", "HOA_HOC"}:
-        raise HTTPException(status_code=400, detail="Mon hoc khong hop le.")
+        raise HTTPException(status_code=400, detail="Môn học không hợp lệ.")
 
     if not all((cleaned_subject_name, cleaned_school_name, cleaned_city, cleaned_variant_code)):
-        raise HTTPException(status_code=400, detail="Thieu metadata bat buoc cua de thi.")
+        raise HTTPException(status_code=400, detail="Thiếu thông tin bắt buộc của đề thi.")
 
     if year < 2000 or year > 2100:
-        raise HTTPException(status_code=400, detail="Nam thi khong hop le.")
+        raise HTTPException(status_code=400, detail="Năm thi không hợp lệ.")
 
     if duration_minutes <= 0 or duration_minutes > 300:
-        raise HTTPException(status_code=400, detail="Thoi luong lam bai khong hop le.")
+        raise HTTPException(status_code=400, detail="Thời lượng làm bài không hợp lệ.")
 
     answer_key_map = parse_answer_key_text(answer_key_text)
     tmp_path: Path | None = None
     try:
         header = await pdf_file.read(8)
         if not re.fullmatch(rb"%PDF-[0-9]\.[0-9]", header):
-            raise HTTPException(status_code=415, detail="Noi dung file khong phai PDF.")
+            raise HTTPException(status_code=415, detail="Nội dung tệp không phải PDF.")
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
             tmp_path = Path(tmp_file.name)
             size = tmp_file.write(header)
             while chunk := await pdf_file.read(1024 * 1024):
                 size += len(chunk)
                 if size > PDF_MAX_BYTES:
-                    raise HTTPException(status_code=413, detail="PDF vuot qua 20 MB.")
+                    raise HTTPException(status_code=413, detail="PDF vượt quá 20 MB.")
                 tmp_file.write(chunk)
 
         raw_model_response = await run_in_threadpool(
@@ -1470,7 +1483,7 @@ async def validate_exam_pdf(
         )
         parsed_payload = parse_model_json_payload(raw_model_response)
         if not parsed_payload:
-            raise HTTPException(status_code=502, detail="Dich vu phan tich tra ve ket qua PDF khong hop le.")
+            raise HTTPException(status_code=502, detail="Dịch vụ phân tích trả về kết quả PDF không hợp lệ.")
 
         response = normalize_pdf_exam_response(
             parsed_payload,

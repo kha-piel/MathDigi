@@ -163,43 +163,43 @@ export const subjectOptions: Array<{
 
 export const topicOptionsBySubjectCode: Record<SubjectCode, string[]> = {
   TOAN: [
-    'Hinh hoc khong gian va Oxyz',
-    'Nguyen ham va tich phan',
-    'Khao sat ham so, cuc tri va GTLN/GTNN',
-    'Mu va logarit',
-    'Xac suat, to hop va thong ke',
-    'Quan he vuong goc va khoi da dien',
+    'Hình học không gian và Oxyz',
+    'Nguyên hàm và tích phân',
+    'Khảo sát hàm số, cực trị và GTLN/GTNN',
+    'Mũ và logarit',
+    'Xác suất, tổ hợp và thống kê',
+    'Quan hệ vuông góc và khối đa diện',
   ],
   VAT_LY: [
-    'Dao dong co',
-    'Song co',
-    'Dien xoay chieu',
-    'Dao dong va song dien tu',
-    'Song anh sang',
-    'Luong tu anh sang',
-    'Hat nhan nguyen tu',
-    'Dien tich va dien truong',
-    'Dong dien khong doi',
-    'Tu truong',
-    'Cam ung dien tu',
-    'Quang hoc',
+    'Dao động cơ',
+    'Sóng cơ',
+    'Điện xoay chiều',
+    'Dao động và sóng điện từ',
+    'Sóng ánh sáng',
+    'Lượng tử ánh sáng',
+    'Hạt nhân nguyên tử',
+    'Điện tích và điện trường',
+    'Dòng điện không đổi',
+    'Từ trường',
+    'Cảm ứng điện từ',
+    'Quang học',
   ],
   HOA_HOC: [
-    'Cau tao nguyen tu, bang tuan hoan va lien ket hoa hoc',
-    'Phan ung oxi hoa khu',
-    'Toc do phan ung va can bang hoa hoc',
-    'Dung dich, pH va chuan do',
-    'Este va lipit',
+    'Cấu tạo nguyên tử, bảng tuần hoàn và liên kết hóa học',
+    'Phản ứng oxi hóa khử',
+    'Tốc độ phản ứng và cân bằng hóa học',
+    'Dung dịch, pH và chuẩn độ',
+    'Este và lipit',
     'Cacbohidrat',
-    'Amin, amino axit va protein',
+    'Amin, amino axit và protein',
     'Polime',
-    'Dai cuong kim loai',
-    'Kim loai kiem, kiem tho va nhom',
-    'Sat va hop chat cua sat',
-    'Dien phan',
-    'Tong hop hoa vo co',
-    'Tong hop hoa huu co',
-    'Hoa hoc voi thuc tien',
+    'Đại cương kim loại',
+    'Kim loại kiềm, kiềm thổ và nhôm',
+    'Sắt và hợp chất của sắt',
+    'Điện phân',
+    'Tổng hợp hóa vô cơ',
+    'Tổng hợp hóa hữu cơ',
+    'Hóa học với thực tiễn',
   ],
 }
 
@@ -236,7 +236,7 @@ export async function requestExamPdfValidation(input: {
   await assertNewPdf(await fingerprintPdf(input.pdfFile, true))
   if (!env.aiApiBaseUrl) {
     throw new Error(
-      'Missing VITE_AI_API_BASE_URL. Copy web-app/.env.example to web-app/.env.local before using AI exam validation.',
+      'Thiếu VITE_AI_API_BASE_URL. Hãy sao chép web-app/.env.example thành web-app/.env.local và cấu hình địa chỉ dịch vụ AI.',
     )
   }
 
@@ -255,30 +255,30 @@ export async function requestExamPdfValidation(input: {
   const timeoutId = window.setTimeout(() => controller.abort(), 240_000)
   const statusTimers = [
     window.setTimeout(() => {
-      input.onStatusChange?.('Dang doc text tu PDF va gui sang AI...')
+      input.onStatusChange?.('Đang đọc văn bản từ PDF và gửi sang AI...')
     }, 1_000),
     window.setTimeout(() => {
-      input.onStatusChange?.('AI dang boc tach cau hoi va ghep dap an...')
+      input.onStatusChange?.('AI đang tách câu hỏi và ghép đáp án...')
     }, 12_000),
     window.setTimeout(() => {
-      input.onStatusChange?.('Tac vu van dang chay. Neu PDF la file scan, Gemini co the mat vai phut...')
+      input.onStatusChange?.('Đang xử lý. Nếu PDF là bản quét, Gemini có thể mất vài phút...')
     }, 45_000),
   ]
 
-  input.onStatusChange?.('Dang upload PDF len backend...')
+  input.onStatusChange?.('Đang tải PDF lên dịch vụ AI...')
 
   const response = await fetch(`${env.aiApiBaseUrl}/api/admin/import-exam-pdf/validate`, {
     method: 'POST',
     body: formData,
     signal: controller.signal,
   })
-    .catch((error: unknown) => {
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        throw new Error('Qua thoi gian cho AI phan tich PDF. Hay thu lai voi PDF nho hon hoac restart ai_service.')
+    .catch(() => {
+      if (controller.signal.aborted) {
+        throw new Error('Đã hết thời gian chờ AI phân tích PDF. Hãy thử lại hoặc chọn tệp nhỏ hơn.')
       }
 
       throw new Error(
-        `Khong ket noi duoc toi AI backend (${env.aiApiBaseUrl}). Kiem tra ai_service co dang chay khong.`,
+        `Không thể kết nối tới dịch vụ AI (${env.aiApiBaseUrl}). Hãy kiểm tra kết nối và trạng thái dịch vụ.`,
       )
     })
     .finally(() => {
@@ -290,7 +290,13 @@ export async function requestExamPdfValidation(input: {
 
   if (!response.ok) {
     const payload: { detail?: unknown } | null = await response.json().catch(() => null)
-    throw new Error(typeof payload?.detail === 'string' ? payload.detail : `AI backend tra ve loi HTTP ${response.status}.`)
+    const detail = payload?.detail
+    const message = typeof detail === 'string'
+      ? detail
+      : detail && typeof detail === 'object' && 'message' in detail && typeof detail.message === 'string'
+        ? detail.message
+        : ''
+    throw new Error(message || `Dịch vụ AI trả về lỗi HTTP ${response.status}.`)
   }
 
   const payload = (await response.json()) as AdminImportValidationResponse
@@ -300,53 +306,53 @@ export async function requestExamPdfValidation(input: {
 export function getQuestionValidationIssues(question: AdminImportQuestion) {
   const issues: string[] = []
   if (!question.questionText.trim()) {
-    issues.push('Thieu de bai.')
+    issues.push('Thiếu đề bài.')
   }
 
   if (!Number.isInteger(question.questionNumber) || question.questionNumber <= 0) {
-    issues.push('So thu tu cau hoi phai la so nguyen duong.')
+    issues.push('Số thứ tự câu hỏi phải là số nguyên dương.')
   }
 
   if (question.difficultyLevel === null || ![1, 2, 3, 4].includes(question.difficultyLevel)) {
-    issues.push('Chon muc do tu 1 den 4.')
+    issues.push('Chọn mức độ từ 1 đến 4.')
   }
-  if (!question.topic.trim()) issues.push('Chon chuyen de cho cau hoi.')
+  if (!question.topic.trim()) issues.push('Chọn chuyên đề cho câu hỏi.')
   if ([question.questionText, ...question.options.map((item) => item.text),
     ...question.statements.map((item) => item.text), question.correctAnswer].some(hasInvalidMath)) {
-    issues.push('Co cong thuc LaTeX khong hien thi duoc.')
+    issues.push('Có công thức LaTeX không hiển thị được.')
   }
 
   if (question.questionType === 'multiple_choice') {
     const optionMap = new Map(question.options.map((option) => [option.label, option.text.trim()]))
     for (const label of ['A', 'B', 'C', 'D'] as const) {
       if (!optionMap.get(label)) {
-        issues.push(`Thieu noi dung dap an ${label}.`)
+        issues.push(`Thiếu nội dung đáp án ${label}.`)
       }
     }
     if (!['A', 'B', 'C', 'D'].includes(question.correctAnswer.trim().toUpperCase())) {
-      issues.push('Dap an dung phai la A, B, C hoac D.')
+      issues.push('Đáp án đúng phải là A, B, C hoặc D.')
     }
   }
 
   if (question.questionType === 'true_false') {
     if (question.statements.length < 4) {
-      issues.push('Can du 4 menh de a, b, c, d.')
+      issues.push('Cần đủ bốn mệnh đề a, b, c, d.')
     }
     const statementMap = new Map(
       question.statements.map((statement) => [statement.label, statement.text.trim()]),
     )
     for (const label of ['a', 'b', 'c', 'd'] as const) {
       if (!statementMap.get(label)) {
-        issues.push(`Thieu noi dung menh de ${label}.`)
+        issues.push(`Thiếu nội dung mệnh đề ${label}.`)
       }
     }
     if (!/^[DS]{4}$/.test(question.correctAnswer.trim().toUpperCase())) {
-      issues.push('Dap an dung/sai phai co dang DDSS.')
+      issues.push('Đáp án đúng/sai phải gồm bốn ký tự D hoặc S.')
     }
   }
 
   if (question.questionType === 'short_answer' && !/^[+-]?\d+(?:[.,]\d+)?(?:\s*\|\s*[+-]?\d+(?:[.,]\d+)?)*$/.test(question.correctAnswer.trim())) {
-    issues.push('Dap an tra loi ngan phai la so; dung | de tach cac dap an chap nhan.')
+    issues.push('Đáp án trả lời ngắn phải là số. Dùng | để phân tách các đáp án được chấp nhận.')
   }
 
   return issues
@@ -370,28 +376,28 @@ export function getDraftValidationIssues(input: {
 }) {
   const issues: string[] = []
   if (!input.pdfFile) {
-    issues.push('Chua co file PDF.')
+    issues.push('Chưa có tệp PDF.')
   }
 
   if (!input.draft) {
-    issues.push('Chua co ket qua phan tich AI.')
+    issues.push('Chưa có kết quả phân tích từ AI.')
     return issues
   }
 
   const numbers = input.draft.questions.map((question) => question.questionNumber)
   const duplicateNumbers = numbers.filter((value, index) => numbers.indexOf(value) !== index)
   if (duplicateNumbers.length > 0) {
-    issues.push(`Question number bi trung: ${Array.from(new Set(duplicateNumbers)).join(', ')}.`)
+    issues.push(`Số câu hỏi bị trùng: ${Array.from(new Set(duplicateNumbers)).join(', ')}.`)
   }
 
   if (input.draft.questions.length === 0) {
-    issues.push('Chua co cau hoi nao de luu.')
+    issues.push('Chưa có câu hỏi nào để lưu.')
   }
 
   for (const question of input.draft.questions) {
     const questionIssues = getQuestionValidationIssues(question)
     if (questionIssues.length > 0) {
-      issues.push(`Cau ${question.questionNumber}: ${questionIssues.join(' ')}`)
+      issues.push(`Câu ${question.questionNumber}: ${questionIssues.join(' ')}`)
     }
   }
 
@@ -399,9 +405,9 @@ export function getDraftValidationIssues(input: {
 }
 
 async function fingerprintPdf(file: File, checkPages = false) {
-  if (file.size > 20 * 1024 * 1024) throw new Error('PDF vuot qua 20 MB.')
+  if (file.size > 20 * 1024 * 1024) throw new Error('PDF vượt quá 20 MB.')
   const header = await file.slice(0, 8).text()
-  if (!/^%PDF-[0-9]\.[0-9]$/.test(header)) throw new Error('Noi dung file khong phai PDF.')
+  if (!/^%PDF-[0-9]\.[0-9]$/.test(header)) throw new Error('Nội dung tệp không phải PDF.')
   const bytes = await file.arrayBuffer()
   const hash = await crypto.subtle.digest('SHA-256', bytes)
   if (checkPages) {
@@ -410,9 +416,9 @@ async function fingerprintPdf(file: File, checkPages = false) {
     const task = getDocument({ data: bytes })
     try {
       const doc = await task.promise.catch(() => {
-        throw new Error('PDF hong hoac bi khoa. Hay chon file PDF khac.')
+        throw new Error('PDF bị hỏng hoặc bị khóa. Hãy chọn tệp PDF khác.')
       })
-      if (doc.numPages > 30) throw new Error('PDF vuot qua 30 trang.')
+      if (doc.numPages > 30) throw new Error('PDF vượt quá 30 trang.')
     } finally {
       await task.destroy()
     }
@@ -423,20 +429,20 @@ async function fingerprintPdf(file: File, checkPages = false) {
 async function assertNewPdf(sha256: string) {
   const { data, error } = await getSupabaseBrowserClient().from('exams')
     .select('exam_id').eq('import_pdf_sha256', sha256).neq('import_state', 'undone').maybeSingle()
-  if (error) throw new Error('Khong the kiem tra PDF trung lap.')
-  if (data) throw new Error(`PDF da duoc nhap vao de ${data.exam_id}.`)
+  if (error) throw new Error('Không thể kiểm tra PDF trùng lặp.')
+  if (data) throw new Error(`PDF đã được nhập vào đề ${data.exam_id}.`)
 }
 
 export async function saveAdminImportedExam(input: SaveAdminImportedExamInput) {
   const supabase = getSupabaseBrowserClient()
   const { examDraft, warnings } = input.draft
-  if (!input.draft.questions.length) throw new Error('Chua co cau hoi nao de luu.')
+  if (!input.draft.questions.length) throw new Error('Chưa có câu hỏi nào để lưu.')
   const sha256 = await fingerprintPdf(input.pdfFile)
   await assertNewPdf(sha256)
   const attempt = crypto.randomUUID()
   const existing = await supabase.from('exams').select('import_state')
     .eq('exam_id', examDraft.examId).maybeSingle()
-  if (existing.error) throw new Error('Khong the kiem tra ma de.')
+  if (existing.error) throw new Error('Không thể kiểm tra mã đề.')
   const examId = existing.data?.import_state === 'undone' ? `${examDraft.examId}-${attempt}` : examDraft.examId
   const prefix = `${examDraft.subjectCode}/${examDraft.year}/${examId}/${attempt}`
   const paths: string[] = []
@@ -447,7 +453,7 @@ export async function saveAdminImportedExam(input: SaveAdminImportedExamInput) {
     let questionNumber = question.questionNumber
     if (!Number.isSafeInteger(questionNumber) || questionNumber <= 0 || questionNumber > 2147483647 || used.has(questionNumber)) {
       while (used.has(fallback) || reserved.has(fallback)) fallback++
-      question = { ...question, warnings: [...question.warnings, `Can kiem tra so cau goc: ${questionNumber}.`] }
+      question = { ...question, warnings: [...question.warnings, `Cần kiểm tra số câu gốc: ${questionNumber}.`] }
       questionNumber = fallback++
     }
     used.add(questionNumber)
@@ -481,12 +487,12 @@ export async function saveAdminImportedExam(input: SaveAdminImportedExamInput) {
     if (error) {
       if (/^[0-9A-Z]{5}$/.test(error.code) && !error.code.startsWith('08')) {
         commitUnknown = false
-        throw new Error(error.code === '23505' ? 'PDF hoac ma de da ton tai.' : `Khong the luu ban nhap: ${error.message}`)
+        throw new Error(error.code === '23505' ? 'PDF hoặc mã đề đã tồn tại.' : `Không thể lưu bản nháp: ${error.message}`)
       }
       const confirmed = await supabase.from('exams').select('exam_id')
         .eq('import_attempt_id', attempt).maybeSingle()
       if (!confirmed.data) {
-        throw new Error('Chua xac nhan duoc ket qua luu. Hay tai lai danh sach de truoc khi thu lai.')
+        throw new Error('Chưa xác nhận được kết quả lưu. Hãy tải lại danh sách đề trước khi thử lại.')
       }
     }
   } catch (error) {
@@ -512,7 +518,7 @@ export async function fetchManagedImportedExams() {
     .limit(24)
 
   if (error) {
-    throw new Error(`Khong the tai danh sach de da nhap: ${error.message}`)
+    throw new Error(`Không thể tải danh sách đề đã nhập: ${error.message}`)
   }
 
   return (data ?? []).map((row) => ({
@@ -538,7 +544,7 @@ export async function updateManagedImportedExam(input: UpdateManagedImportedExam
   const subject = subjectOptions.find((item) => item.code === input.subjectCode)
 
   if (!subject) {
-    throw new Error('Mon hoc khong hop le.')
+    throw new Error('Môn học không hợp lệ.')
   }
 
   const payload = {
@@ -559,7 +565,7 @@ export async function updateManagedImportedExam(input: UpdateManagedImportedExam
     .eq('exam_id', input.examId)
 
   if (examError) {
-    throw new Error(`Khong the cap nhat thong tin de thi: ${examError.message}`)
+    throw new Error(`Không thể cập nhật thông tin đề thi: ${examError.message}`)
   }
 
 }
@@ -587,11 +593,11 @@ export async function fetchManagedImportedExamDraft(examId: string) {
     }>()
 
   if (examError) {
-    throw new Error(`Khong the tai thong tin de thi: ${examError.message}`)
+    throw new Error(`Không thể tải thông tin đề thi: ${examError.message}`)
   }
 
   if (!examRow) {
-    throw new Error('Khong tim thay de thi can chinh sua.')
+    throw new Error('Không tìm thấy đề thi cần chỉnh sửa.')
   }
 
   const { data: questionRows, error: questionError } = await supabase
@@ -604,7 +610,7 @@ export async function fetchManagedImportedExamDraft(examId: string) {
     .returns<ManagedExamQuestionRow[]>()
 
   if (questionError) {
-    throw new Error(`Khong the tai cau hoi cua de thi: ${questionError.message}`)
+    throw new Error(`Không thể tải câu hỏi của đề thi: ${questionError.message}`)
   }
 
   return {
@@ -674,7 +680,7 @@ export async function saveManagedImportedExamDraft(input: {
     const { error } = await getSupabaseBrowserClient().rpc('save_school_exam_import', { bundle, reviewing: true })
     if (error) {
       commitUnknown = !/^[0-9A-Z]{5}$/.test(error.code) || error.code.startsWith('08')
-      throw new Error(`Khong the xac nhan luu duyet de: ${error.message}`)
+      throw new Error(`Không thể xác nhận đã lưu kết quả duyệt: ${error.message}`)
     }
   } catch (error) {
     if (!commitUnknown) await cleanupFailedUpload(paths, error)
@@ -687,7 +693,7 @@ export async function setManagedExamImportState(examId: string, state: 'publishe
     target_exam_id: examId,
     target_state: state,
   })
-  if (error) throw new Error(`Khong the doi trang thai de thi: ${error.message}`)
+  if (error) throw new Error(`Không thể đổi trạng thái đề thi: ${error.message}`)
   invalidateSchoolExamCaches()
   invalidatePracticeQuestionBankCache()
   return data as 'published' | 'unpublished' | 'undone'
@@ -825,16 +831,16 @@ function buildSectionRows(examId: string, questions: AdminImportQuestion[]) {
         part_code: partCode,
         title:
           partCode === 'multiple_choice'
-            ? 'Phan I. Trac nghiem nhieu lua chon'
+            ? 'Phần I. Trắc nghiệm nhiều lựa chọn'
             : partCode === 'true_false'
-              ? 'Phan II. Dung sai'
-              : 'Phan III. Tra loi ngan',
+              ? 'Phần II. Đúng/sai'
+              : 'Phần III. Trả lời ngắn',
         instructions:
           partCode === 'multiple_choice'
-            ? 'Moi cau chon 1 trong 4 dap an.'
+            ? 'Mỗi câu chọn một trong bốn đáp án.'
             : partCode === 'true_false'
-              ? 'Moi cau gom 4 menh de dung/sai.'
-              : 'Nhap dap an ngan.',
+              ? 'Mỗi câu gồm bốn mệnh đề đúng/sai.'
+              : 'Nhập đáp án ngắn.',
         start_question_number: partQuestions[0].questionNumber,
         end_question_number: partQuestions[partQuestions.length - 1].questionNumber,
         display_order: index + 1,
@@ -857,7 +863,7 @@ async function cleanupFailedUpload(paths: string[], failure: unknown) {
   if (!paths.length) return
   const bucket = getSupabaseBrowserClient().storage.from(STORAGE_BUCKET)
   const { error } = await bucket.remove(paths)
-  if (error) throw new Error(`${failure instanceof Error ? failure.message : 'Luu that bai.'} Khong the don file Storage: ${error.message}`)
+  if (error) throw new Error(`${failure instanceof Error ? failure.message : 'Lưu thất bại.'} Không thể dọn tệp trong Storage: ${error.message}`)
 }
 
 async function uploadQuestionAssets(prefix: string, questions: AdminImportQuestion[], paths: string[]) {
@@ -882,10 +888,10 @@ async function uploadQuestionAssets(prefix: string, questions: AdminImportQuesti
 
 function buildStorageUploadErrorMessage(target: string, message: string) {
   if (message.toLowerCase().includes('bucket not found')) {
-    return `Khong the upload ${target}: bucket "${STORAGE_BUCKET}" chua ton tai. Hay chay web-app/supabase/setup_school_exam_storage_bucket.sql trong Supabase SQL Editor.`
+    return `Không thể tải ${target}: bucket "${STORAGE_BUCKET}" chưa tồn tại. Hãy chạy web-app/supabase/setup_school_exam_storage_bucket.sql trong Supabase SQL Editor.`
   }
 
-  return `Khong the upload ${target} len Storage: ${message}`
+  return `Không thể tải ${target} lên Storage: ${message}`
 }
 
 

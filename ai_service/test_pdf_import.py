@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 import httpx
 import pymupdf as fitz
 from fastapi import HTTPException
+from google.genai.errors import ClientError
 
 with patch("dotenv.load_dotenv"), patch.dict("os.environ", {"GEMINI_API_KEY": "test-placeholder"}):
     from ai_service import main
@@ -132,6 +133,26 @@ class PdfImportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake.status_code, 415)
         self.assertEqual(too_large.status_code, 413)
         analyze.assert_not_called()
+
+    async def test_gemini_key_rejection_returns_a_readable_provider_error(self):
+        provider_error = ClientError(400, {"error": {
+            "message": "Provider error text should not be returned to the browser",
+            "details": [{"reason": "API_KEY_INVALID"}],
+        }})
+        origin = "http://localhost:5173"
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://testserver") as api:
+            with patch.object(main.pdf_client.files, "upload", side_effect=provider_error) as upload:
+                response = await api.post(
+                    "/api/admin/import-exam-pdf/validate", data=FORM, headers={"Origin": origin},
+                    files={"pdfFile": (SAMPLE.name, SAMPLE.read_bytes(), "application/pdf")},
+                )
+        upload.assert_called_once()
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.headers["access-control-allow-origin"], origin)
+        self.assertEqual(response.json()["detail"], {
+            "code": "AI_PROVIDER_API_KEY_INVALID",
+            "message": "Gemini từ chối khóa API. Hãy liên hệ quản trị viên để kiểm tra cấu hình khóa.",
+        })
 
     async def test_sample_scan_keeps_invalid_questions_and_does_not_infer_difficulty(self):
         payload = '{"questions":[{"questionNumber":1,"questionType":"multiple_choice","difficultyLevel":4,"questionText":"Test"},{"questionNumber":2,"questionType":"short_answer","questionText":"Test"}]}'
