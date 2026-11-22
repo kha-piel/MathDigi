@@ -14,6 +14,7 @@ import {
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { logout } from '../../features/auth/services/auth-service'
 import { useAuthSessionStore } from '../../features/auth/store/auth-session-store'
+import { getRoleLabel } from './role-label'
 
 type NavigationItem = {
   label: string
@@ -81,6 +82,7 @@ export function DashboardLayout() {
               onNavigate={() => setIsMobileMenuOpen(false)}
               onLogout={handleLogout}
               userLabel={user?.fullName || user?.username || user?.email || 'Học sinh'}
+              roleLabel={getRoleLabel(user?.role)}
             />
           </aside>
         )}
@@ -126,6 +128,7 @@ export function DashboardLayout() {
                   onNavigate={() => setIsMobileMenuOpen(false)}
                   onLogout={handleLogout}
                   userLabel={user?.fullName || user?.username || user?.email || 'Học sinh'}
+                  roleLabel={getRoleLabel(user?.role)}
                 />
               </aside>
             </div>
@@ -150,6 +153,7 @@ function SidebarContent({
   navigationItems,
   onNavigate,
   userLabel,
+  roleLabel,
 }: {
   currentPath: string
   onLogout: () => void | Promise<void>
@@ -157,6 +161,7 @@ function SidebarContent({
   navigationItems: NavigationItem[]
   onNavigate: () => void
   userLabel: string
+  roleLabel: string
 }) {
   return (
     <div className="flex h-full flex-col px-4 py-6">
@@ -204,7 +209,7 @@ function SidebarContent({
             </div>
             <div className="overflow-hidden">
               <p className="truncate text-sm font-bold text-slate-800">{userLabel}</p>
-              <p className="truncate text-xs font-medium text-slate-500">Học sinh</p>
+              <p className="truncate text-xs font-medium text-slate-500">{roleLabel}</p>
             </div>
           </div>
         </div>
