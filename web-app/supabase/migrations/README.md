@@ -16,6 +16,14 @@ pg_dump "$SUPABASE_DB_URL" -Fc -f mathdigi-before-math-only.dump
 psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f web-app/supabase/migrations/20261122000_math_only_precheck.sql
 ```
 
+**Before 003/004:** apply `../security_hardening_phase0.sql` first. 003 and 004 reuse
+`current_user_is_school_exam_admin()`; without Phase 0 that helper is the old one from
+`setup_school_exam_admin_policies.sql`, which also grants admin by profile email and to
+anyone signed in as `admin@local.test`. Then apply **006** after both Phase 0 and
+`../migrate_phase4_exam_import.sql`: it makes the exam-import admin check accept only
+status `active`, and re-creates the phase4 visibility policies (unpublished imports
+hidden from students) if Phase 0 dropped them.
+
 Review raw exam subject counts, FK-dependent counts, subjects/topics/legacy counts,
 Storage prefixes and table columns. Apply complete files **000 → 001 → 002 → 003
 → 004**, with the same psql command (change filename), or execute each entire file
@@ -110,3 +118,7 @@ adds live-shaped subjects/topics plus legacy FK fixtures, tests RLS/reruns/error
 and compares public schema plus every public/auth/storage table checksum after
 full reverse rollback. Container/port are random and cleaned on exit. Storage
 tests use only a local HTTP mock.
+
+Roll back **006** (`../rollback/20261122006_phase4_import_admin_active_status_rollback.sql`)
+before any other file: it restores the NULL-status-as-active import check and drops only
+the phase4 visibility policies 006 re-created.
