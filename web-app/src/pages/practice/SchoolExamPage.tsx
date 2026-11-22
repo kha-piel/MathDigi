@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { setTutorContext, clearTutorContext, setTutorDisabled, TUTOR_EXAM_DISABLED } from '../../features/tutor-chat/store'
+import { resolveTutorReviewItem } from '../../features/tutor-chat/review-context'
 import { Link, useBlocker, useParams } from 'react-router-dom'
 import { PageCard } from '../../components/ui/PageCard'
 import { MarkdownContent } from '../../components/ui/MarkdownContent'
@@ -83,6 +84,7 @@ export function SchoolExamPage() {
   const [schoolAttemptId, setSchoolAttemptId] = useState('')
   const [isConfirmSubmitOpen, setIsConfirmSubmitOpen] = useState(false)
   const startedAtRef = useRef(Date.now())
+  const lastTutorReviewQuestionNumber = useRef<number | null>(null)
 
   const tutorExamRunning = Boolean(exam && exam.durationMinutes > 0 && !submitted)
   useEffect(() => {
@@ -113,6 +115,7 @@ export function SchoolExamPage() {
         setRecommendedTopics([])
         setWeaknessAnalysisError('')
         setSelectedReviewQuestionNumber(null)
+        lastTutorReviewQuestionNumber.current = null
         setSelectedReviewChatInput('')
         setAiChatHistoryByQuestion({})
         setSchoolAttemptId('')
@@ -452,7 +455,8 @@ export function SchoolExamPage() {
   }, [reviewItems, selectedReviewQuestionNumber])
 
   useEffect(() => {
-    const item = selectedReviewItem ?? reviewItems[0]
+    if (selectedReviewItem) lastTutorReviewQuestionNumber.current = selectedReviewItem.questionNumber
+    const item = resolveTutorReviewItem(reviewItems, selectedReviewItem?.questionNumber ?? null, lastTutorReviewQuestionNumber.current)
     if (submitted && item) setTutorContext({
       question_number: item.questionNumber,
       question_content: item.questionContent,
@@ -827,7 +831,7 @@ export function SchoolExamPage() {
         </div>
 
         {selectedReviewItem ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
+          <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
             <div className="flex h-[92vh] w-full max-w-[1320px] flex-col overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_40px_120px_rgba(15,23,42,0.24)]">
               <div className="shrink-0 flex items-center justify-between gap-4 border-b border-slate-200 px-6 py-5">
                 <div>
