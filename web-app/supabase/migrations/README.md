@@ -36,8 +36,19 @@ in SQL Editor. Every file is one transaction.
 - **004:** create the reviewed question bank, options/assets, indexes, trigger and
   RLS. Anonymous/authenticated students see approved rows only; authenticated
   admins can manage all rows. The existing admin helper is required.
+- **005:** allow null `student_attempts.exam_id` and require it for rows marked
+  `metadata.attempt_kind = practice`; add a partial practice-history index.
+  This migration can run independently against the existing live attempts table;
+  it does not require the question-bank migrations. It records the original
+  nullability, rejects inconsistent existing practice rows, and does not change
+  RLS or existing data. Application saves remain best-effort until it is applied.
 
 ## Rollback
+
+If 005 was applied, roll it back first using its matching rollback file. It
+restores the original nullability and refuses to restore NOT NULL while null-exam
+attempts exist; back up and reconcile those rows manually rather than deleting
+learning history automatically.
 
 Stop writes; apply matching files in `../rollback/` in reverse: **004 → 003 → 002
 → 001**. Rollback 004 refuses a nonempty bank. To explicitly back up its rows to

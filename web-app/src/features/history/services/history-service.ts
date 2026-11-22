@@ -1,3 +1,5 @@
+import { isMissingHistoryTable, practiceKindFilter } from '../../exam/core/practice-attempt'
+import { settleHistorySource } from './history-source'
 import { getSupabaseBrowserClient } from '../../../lib/supabase/client'
 import {
   fetchSchoolExamAiHistory,
@@ -27,76 +29,50 @@ export type UnifiedAiHistoryItem = {
 
 type PracticeAiMessageRow = {
   message_id: string
-  session_id: string
+  attempt_id: string
   role: 'user' | 'assistant' | 'system'
   content: string
-  related_question_id: string | null
   created_at: string
-  chat_sessions:
-    | {
-        title: string | null
-        related_attempt_id: string | null
-        exams:
-          | {
-              title: string
-            }
-          | {
-              title: string
-            }[]
-          | null
-      }
-    | {
-        title: string | null
-        related_attempt_id: string | null
-        exams:
-          | {
-              title: string
-            }
-          | {
-              title: string
-            }[]
-          | null
-      }[]
-    | null
+  metadata: { question_id?: string } | null
+  student_attempts: { metadata: { title?: string } | null } | { metadata: { title?: string } | null }[] | null
 }
 
 export async function fetchPracticeAiHistory(userId: string): Promise<PracticeAiHistoryMessage[]> {
   const supabase = getSupabaseBrowserClient()
   const { data, error } = await supabase
-    .from('chat_messages')
-    .select('message_id, session_id, role, content, related_question_id, created_at, chat_sessions!inner(user_id, title, related_attempt_id, exams(title))')
-    .eq('chat_sessions.user_id', userId)
+    .from('student_ai_messages')
+    .select('message_id, attempt_id, role, content, created_at, metadata, student_attempts!inner(user_id, metadata)')
+    .eq('student_attempts.user_id', userId)
+    .eq(...practiceKindFilter('student_attempts.'))
     .order('created_at', { ascending: false })
     .returns<PracticeAiMessageRow[]>()
-
   if (error) {
-    throw new Error(`Khong the tai lich su AI on tap: ${error.message}`)
+    if (isMissingHistoryTable(error)) return []
+    throw new Error(`Không thể tải lịch sử AI luyện tập: ${error.message}`)
   }
-
-  return data.map((message) => {
-    const session = unwrapSingle(message.chat_sessions)
-    const exam = unwrapSingle(session?.exams)
-    return {
-      messageId: message.message_id,
-      sessionId: message.session_id,
-      attemptId: session?.related_attempt_id ?? null,
-      examTitle: exam?.title ?? session?.title ?? 'AI on tap',
-      role: message.role,
-      content: message.content,
-      questionId: message.related_question_id,
-      createdAt: message.created_at,
-    }
-  })
+  return (data ?? []).map((message) => ({
+    messageId: message.message_id,
+    sessionId: message.attempt_id,
+    attemptId: message.attempt_id,
+    examTitle: unwrapSingle(message.student_attempts)?.metadata?.title ?? 'AI luyện tập',
+    role: message.role,
+    content: message.content,
+    questionId: message.metadata?.question_id ?? null,
+    createdAt: message.created_at,
+  }))
 }
 
 export async function fetchUnifiedAiHistory(userId: string): Promise<UnifiedAiHistoryItem[]> {
   const [practiceMessages, schoolExamMessages] = await Promise.all([
-    fetchPracticeAiHistory(userId),
-    fetchSchoolExamAiHistory(userId),
+    settleHistorySource(fetchPracticeAiHistory(userId), [], 'AI luyện tập'),
+    settleHistorySource(fetchSchoolExamAiHistory(userId), [], 'AI đề trường'),
   ])
 
+  for (const source of [practiceMessages, schoolExamMessages]) {
+    if (source.error) console.warn(source.error)
+  }
   return [
-    ...practiceMessages.map((message) => ({
+    ...practiceMessages.data.map((message) => ({
       id: `practice-${message.messageId}`,
       source: 'practice' as const,
       title: message.examTitle,
@@ -105,7 +81,7 @@ export async function fetchUnifiedAiHistory(userId: string): Promise<UnifiedAiHi
       content: message.content,
       createdAt: message.createdAt,
     })),
-    ...schoolExamMessages.map(mapSchoolExamAiMessage),
+    ...schoolExamMessages.data.map(mapSchoolExamAiMessage),
   ].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
 }
 

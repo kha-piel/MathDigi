@@ -1,4 +1,7 @@
 import type { ExamSubmissionSummary, ReviewQuestionSummary } from '../core/exam-session'
+import { buildSubmissionSummary } from '../core/exam-session'
+import { isMissingHistoryTable, practiceKindFilter } from '../core/practice-attempt'
+import type { PracticeAttemptMetadata } from '../core/practice-attempt'
 import { getSupabaseBrowserClient } from '../../../lib/supabase/client'
 
 type AttemptReviewRow = {
@@ -7,61 +10,23 @@ type AttemptReviewRow = {
   correct_count: number
   wrong_count: number
   skipped_count: number
-  total_time_taken_seconds: number | null
+  total_count: number
   completed_at: string | null
-  status: string
-  metadata: {
-    difficulty_label?: string
-    subject_name?: string
-    topic_name?: string
-  } | null
-  exams:
-    | {
-        title: string
-      }
-    | {
-        title: string
-      }[]
-    | null
-  attempt_answers: PersistedAttemptAnswerRow[] | null
+  metadata: Partial<PracticeAttemptMetadata> | null
 }
 
-type PersistedAttemptAnswerRow = {
-  question_id: string
-  is_correct: boolean | null
-  metadata: {
-    ai_explanation?: string | null
-    question_content?: string | null
-  } | null
-  question:
-    | {
-        content: string
-        answers: PersistedQuestionAnswerRow[] | null
-      }
-    | {
-        content: string
-        answers: PersistedQuestionAnswerRow[] | null
-      }[]
-    | null
-  selected_answer:
-    | {
-        answer_id: string
-        option_label: string
-        content: string
-      }
-    | {
-        answer_id: string
-        option_label: string
-        content: string
-      }[]
-    | null
-}
-
-type PersistedQuestionAnswerRow = {
-  answer_id: string
-  option_label: string
-  content: string
+type AnswerReviewRow = {
+  question_number: number
+  selected_answer: string | null
+  correct_answer: string | null
   is_correct: boolean
+  question_content: string | null
+  metadata: {
+    question_id?: string
+    selected_answer_text?: string
+    correct_answer_text?: string
+    ai_explanation?: string
+  } | null
 }
 
 export type PersistedAttemptReview = ExamSubmissionSummary & {
@@ -76,75 +41,46 @@ export type PersistedAttemptReview = ExamSubmissionSummary & {
 
 export async function fetchPersistedAttemptReview(attemptId: string) {
   const supabase = getSupabaseBrowserClient()
-  const { data, error } = await supabase
-    .from('student_attempts')
-    .select(
-      'attempt_id, score, correct_count, wrong_count, skipped_count, total_time_taken_seconds, completed_at, status, metadata, exams(title), attempt_answers(question_id, is_correct, metadata, question:questions(content, answers(answer_id, option_label, content, is_correct)), selected_answer:answers!attempt_answers_selected_answer_id_fkey(answer_id, option_label, content))',
-    )
-    .eq('attempt_id', attemptId)
-    .maybeSingle<AttemptReviewRow>()
-
+  const { data, error } = await supabase.from('student_attempts')
+    .select('attempt_id, score, correct_count, wrong_count, skipped_count, total_count, completed_at, metadata')
+    .eq('attempt_id', attemptId).eq(...practiceKindFilter()).maybeSingle<AttemptReviewRow>()
   if (error) {
-    throw new Error(`Không thể tải dữ liệu review đã lưu: ${error.message}`)
+    if (isMissingHistoryTable(error)) return null
+    throw new Error(`Không thể tải dữ liệu review: ${error.message}`)
   }
+  if (!data) return null
 
-  if (!data) {
-    return null
+  const { data: answers, error: answerError } = await supabase.from('student_answers')
+    .select('question_number, selected_answer, correct_answer, is_correct, question_content, metadata')
+    .eq('attempt_id', attemptId).order('question_number').returns<AnswerReviewRow[]>()
+  const snapshot = data.metadata?.session && data.metadata?.runtime
+    ? buildSubmissionSummary(data.metadata.session, data.metadata.runtime) : null
+  if (answerError && !snapshot && !isMissingHistoryTable(answerError)) {
+    throw new Error(`Không thể tải đáp án: ${answerError.message}`)
   }
-
-  const examTitle = unwrapSingle(data.exams)?.title ?? 'Attempt Review'
-  const reviewItems = (data.attempt_answers ?? []).map(mapPersistedReviewItem)
-
+  const reviewItems: ReviewQuestionSummary[] = answers?.length ? answers.map((row) => ({
+    questionId: row.metadata?.question_id ?? String(row.question_number),
+    questionContent: row.question_content ?? '',
+    selectedAnswerText: row.metadata?.selected_answer_text ?? row.selected_answer ?? 'Chưa chọn đáp án',
+    correctAnswerText: row.metadata?.correct_answer_text ?? row.correct_answer ?? 'Không rõ đáp án đúng',
+    correct: row.is_correct,
+    explanation: row.metadata?.ai_explanation,
+  })) : snapshot?.reviewItems ?? []
   return {
     attemptId: data.attempt_id,
-    examTitle,
+    examTitle: data.metadata?.title ?? 'Bài luyện tập',
     topicName: data.metadata?.topic_name ?? '--',
     subjectName: data.metadata?.subject_name ?? '--',
     difficultyLabel: data.metadata?.difficulty_label ?? '--',
-    score: roundScore(data.score),
+    score: Math.round((data.score ?? 0) * 100) / 100,
     correctCount: data.correct_count,
     wrongCount: data.wrong_count,
     skippedCount: data.skipped_count,
-    totalQuestions: reviewItems.length,
+    totalQuestions: data.total_count,
     passed: (data.score ?? 0) >= 5,
-    timeTakenSeconds: data.total_time_taken_seconds ?? 0,
+    timeTakenSeconds: data.metadata?.total_time_taken_seconds ?? 0,
     reviewItems,
     completedAt: data.completed_at,
-    status: data.status,
+    status: data.metadata?.status ?? 'completed',
   } satisfies PersistedAttemptReview
-}
-
-function mapPersistedReviewItem(row: PersistedAttemptAnswerRow): ReviewQuestionSummary {
-  const question = unwrapSingle(row.question)
-  const selectedAnswer = unwrapSingle(row.selected_answer)
-  const correctAnswer = (question?.answers ?? []).find((answer) => answer.is_correct) ?? null
-
-  return {
-    questionId: row.question_id,
-    questionContent: question?.content ?? row.metadata?.question_content ?? 'Question not found',
-    selectedAnswerText: selectedAnswer
-      ? `${selectedAnswer.option_label}. ${selectedAnswer.content}`
-      : 'Chưa chọn đáp án',
-    correctAnswerText: correctAnswer
-      ? `${correctAnswer.option_label}. ${correctAnswer.content}`
-      : 'Không rõ đáp án đúng',
-    correct: Boolean(row.is_correct),
-    explanation: row.metadata?.ai_explanation ?? undefined,
-  }
-}
-
-function roundScore(score: number | null) {
-  if (score === null) {
-    return 0
-  }
-
-  return Math.round(score * 100) / 100
-}
-
-function unwrapSingle<T>(value: T | T[] | null | undefined) {
-  if (Array.isArray(value)) {
-    return value[0] ?? null
-  }
-
-  return value ?? null
 }

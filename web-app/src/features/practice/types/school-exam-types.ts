@@ -109,6 +109,7 @@ export type SchoolExamQuestionRecord = {
   topic: string
   obsidianSourcePath: string
   hasImage: boolean
+  solution?: string | null
   answerValue?: string
   sourceQuestionNumber?: number
   sourceSectionNumber?: number

@@ -34,6 +34,7 @@ export type PracticeBlueprint = {
 }
 
 export type PracticeQuestion = DraftQuestion & {
+  hasImage?: boolean
   subjectId: string
   subjectName: string
   sourceExamId: string

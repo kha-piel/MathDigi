@@ -78,7 +78,8 @@ export function createExamRuntimeSession(session: ExamDraftSession): ExamRuntime
   }
 }
 
-export function getRemainingSeconds(session: ExamDraftSession, runtime: ExamRuntimeSession) {
+export function getRemainingSeconds(session: { durationMinutes?: number }, runtime: Pick<ExamRuntimeSession, 'startedAt'>): number | null {
+  if (typeof session.durationMinutes !== 'number' || !Number.isFinite(session.durationMinutes) || session.durationMinutes <= 0) return null
   const elapsedSeconds = Math.floor((Date.now() - runtime.startedAt) / 1000)
   const totalSeconds = session.durationMinutes * 60
   return Math.max(0, totalSeconds - elapsedSeconds)
