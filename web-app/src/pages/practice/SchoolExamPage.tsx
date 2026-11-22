@@ -78,6 +78,7 @@ export function SchoolExamPage() {
   const [weaknessAnalysisError, setWeaknessAnalysisError] = useState('')
 
   const [selectedReviewQuestionNumber, setSelectedReviewQuestionNumber] = useState<number | null>(null)
+  const [practiceTutorQuestionNumber, setPracticeTutorQuestionNumber] = useState<number | null>(null)
   const [selectedReviewChatInput, setSelectedReviewChatInput] = useState('')
   const [aiChatHistoryByQuestion, setAiChatHistoryByQuestion] = useState<Record<number, ReviewChatMessage[]>>({})
   const [isSavingAttempt, setIsSavingAttempt] = useState(false)
@@ -115,6 +116,7 @@ export function SchoolExamPage() {
         setRecommendedTopics([])
         setWeaknessAnalysisError('')
         setSelectedReviewQuestionNumber(null)
+        setPracticeTutorQuestionNumber(null)
         lastTutorReviewQuestionNumber.current = null
         setSelectedReviewChatInput('')
         setAiChatHistoryByQuestion({})
@@ -456,24 +458,30 @@ export function SchoolExamPage() {
 
   useEffect(() => {
     if (selectedReviewItem) lastTutorReviewQuestionNumber.current = selectedReviewItem.questionNumber
-    const item = resolveTutorReviewItem(reviewItems, selectedReviewItem?.questionNumber ?? null, lastTutorReviewQuestionNumber.current)
-    if (submitted && item) setTutorContext({
+    const item = submitted
+      ? resolveTutorReviewItem(reviewItems, selectedReviewItem?.questionNumber ?? null, lastTutorReviewQuestionNumber.current)
+      : resolveTutorReviewItem(reviewItems, practiceTutorQuestionNumber, null)
+    if ((submitted || (exam && exam.durationMinutes <= 0)) && item) setTutorContext({
       question_number: item.questionNumber,
       question_content: item.questionContent,
-      options: item.options.map((option) => option.optionText),
+      options: [
+        ...item.options.map((option) => `${option.optionLabel}. ${option.optionText}`),
+        ...item.statements.map((statement) => `${statement.label}. ${statement.text}`),
+      ],
+      question_type: item.partCode,
       topic: item.topic,
       student_answer: item.selectedAnswer,
       correct_answer: item.correctAnswer,
       solution: item.explanation,
       source: 'school_exam', exam_id: examId, attempt_id: schoolAttemptId,
     })
+    else clearTutorContext()
     return clearTutorContext
-  }, [selectedReviewItem, reviewItems, submitted, examId, schoolAttemptId])
+  }, [selectedReviewItem, reviewItems, submitted, examId, schoolAttemptId, exam, practiceTutorQuestionNumber])
 
   function selectTutorQuestion(questionNumber: number) {
-    if (!submitted) return
-    const record = questionRecordByNumber[questionNumber]
-    setTutorContext({ question_number: questionNumber, question_content: record?.questionText ?? `Câu ${questionNumber}`, options: record?.options.map((o) => `${o.optionLabel}. ${o.optionText}`), question_type: record?.questionType, topic: record?.topic, student_answer: selectedChoices[String(questionNumber)] ?? shortAnswers[String(questionNumber)] ?? '', correct_answer: formatAnswerKeyValue(answerKeyByQuestionNumber[questionNumber] ?? ''), source: 'school_exam', exam_id: examId, attempt_id: schoolAttemptId })
+    if (tutorExamRunning) return
+    setPracticeTutorQuestionNumber(questionNumber)
   }
 
   async function handleExplainWrongAnswer(item: ReviewItem) {
@@ -1136,6 +1144,7 @@ export function SchoolExamPage() {
                       <article
                         key={questionNumber}
                         onClick={() => selectTutorQuestion(questionNumber)}
+                        onFocusCapture={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
@@ -1195,6 +1204,7 @@ export function SchoolExamPage() {
                       <article
                         key={questionNumber}
                         onClick={() => selectTutorQuestion(questionNumber)}
+                        onFocusCapture={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
@@ -1276,6 +1286,7 @@ export function SchoolExamPage() {
                       <article
                         key={questionNumber}
                         onClick={() => selectTutorQuestion(questionNumber)}
+                        onFocusCapture={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
