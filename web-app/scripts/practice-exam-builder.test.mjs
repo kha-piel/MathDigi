@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildBlueprintQuestions, contentFingerprint, deduplicateQuestions, isContextDependentQuestion } from '../src/features/practice/services/practice-exam-builder.ts'
+import { buildBlueprintQuestions, contentFingerprint, deduplicateQuestions, hasContextDependentContent, isContextDependentQuestion } from '../src/features/practice/services/practice-exam-builder.ts'
 import { fetchQuestionPages } from '../src/features/practice/services/practice-pool-loader.ts'
 import { practiceBlueprints } from '../src/features/practice/data/practice-blueprints.ts'
 import { buildSubmissionSummary, checkQuestion, createExamRuntimeSession, formatCorrectResponse } from '../src/features/exam/core/exam-session.ts'
@@ -76,6 +76,46 @@ test('balanced and random mock pools exclude dependent questions without mutatin
     assert.throws(() => build([dependent], { blueprint: singleSection(1), mode }))
   }
   assert.equal(dependent.content, 'Với miền ở câu 29, GTLN của F bằng')
+})
+
+test('TF statements and MC options with cross-question references exclude the whole mock question', () => {
+  const exactStatement = 'Dựa vào kết quả câu 1, khẳng định này đúng.'
+  assert.equal(isContextDependentQuestion(exactStatement, 2), true)
+  for (const type of ['true_false', 'multiple_choice']) {
+    const standalone = question(`safe-${type}`, 2, type)
+    const dependent = { ...question(`dependent-${type}`, 2, type),
+      sourceMeta: { sourceQuestionNumber: 2 } }
+    if (type === 'true_false') {
+      dependent.statements = [
+        { statementId: 'a', content: 'a) Tính diện tích mặt cầu trên.', isCorrect: true },
+        { statementId: 'b', content: `b) ${exactStatement}`, isCorrect: false },
+      ]
+    } else {
+      dependent.answers[3].content = `D. ${exactStatement}`
+    }
+    assert.equal(hasContextDependentContent(dependent), true)
+    for (const mode of ['balanced', 'random']) {
+      const result = build([standalone, dependent], { blueprint: singleSection(2, 2, type), mode })
+      assert.deepEqual(result.questions.map((q) => q.questionId), [standalone.questionId])
+      assert.ok(result.warnings.length)
+    }
+    assert.equal(hasContextDependentContent(dependent), true)
+  }
+})
+
+test('nested labels, sphere wording and own numbers remain valid independent question content', () => {
+  const independent = { ...question('safe-tf', 2, 'true_false'), sourceMeta: { sourceQuestionNumber: 2 },
+    statements: [
+      { statementId: 'a', content: '(a) Tính diện tích mặt cầu trên.', isCorrect: true },
+      { statementId: 'b', content: 'b) Nhu cầu trên thỏa mãn yêu cầu trước.', isCorrect: false },
+      { statementId: 'c', content: 'c) Câu 2. Tính diện tích miền.', isCorrect: true },
+      { statementId: 'd', content: 'd) Dựa vào kết quả câu 2, khẳng định này đúng.', isCorrect: true },
+    ] }
+  assert.equal(hasContextDependentContent(independent), false)
+  assert.equal(isContextDependentQuestion('a) Câu 2. Tính diện tích miền.'), false)
+  assert.equal(hasContextDependentContent({ content: '', answers: [], statements: [] }), false)
+  assert.equal(hasContextDependentContent({ content: '', answers: [] }), false)
+  assert.equal(build([independent], { blueprint: singleSection(1, 2, 'true_false') }).questions.length, 1)
 })
 
 test('small pool returns a partial exam and warnings without throwing', () => {

@@ -39,6 +39,7 @@ export function contentFingerprint(type: string, text: string, options: string[]
 export function isContextDependentQuestion(content: string, ownQuestionNumber?: number) {
   const questionMarker = '\uE000'
   const normalized = content.normalize('NFC').toLowerCase()
+    .replace(/^\s*(?:\*{1,2})?\(?[a-d][.)](?:\*{1,2})?\s*/, '')
     .replace(/(?<![\p{L}\p{N}_])câu(?![\p{L}\p{N}_])/gu, questionMarker)
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\bcau\b/g, 'nonquestion').replaceAll(questionMarker, 'cau')
@@ -54,6 +55,14 @@ export function isContextDependentQuestion(content: string, ownQuestionNumber?: 
     || /\b(?:o|ket qua(?: cua)?|du kien(?: cua)?)\s+cau(?: hoi)?\b(?!\s+lac bo\b)/.test(withoutNumbers)
 }
 
+export function hasContextDependentContent(
+  question: Pick<PracticeQuestion, 'content' | 'statements' | 'answers' | 'sourceMeta'>,
+) {
+  return [question.content, ...(question.statements ?? []).map((statement) => statement.content),
+    ...question.answers.map((answer) => answer.content)]
+    .some((content) => isContextDependentQuestion(content, question.sourceMeta?.sourceQuestionNumber))
+}
+
 export function buildBlueprintQuestions(input: {
   blueprint: PracticeBlueprint
   questionBank: PracticeQuestion[]
@@ -67,8 +76,7 @@ export function buildBlueprintQuestions(input: {
   const used = new Set<string>()
   const examCounts = new Map<string, number>()
   const topicCounts = new Map<string, number>()
-  const independentQuestions = input.questionBank.filter((q) =>
-    !isContextDependentQuestion(q.content, q.sourceMeta?.sourceQuestionNumber))
+  const independentQuestions = input.questionBank.filter((q) => !hasContextDependentContent(q))
   const bank = deduplicateQuestions(independentQuestions, (q) => contentFingerprint(
     q.questionType, q.content, q.questionType === 'true_false'
       ? (q.statements ?? []).map((s) => s.content) : q.answers.map((a) => a.content),
