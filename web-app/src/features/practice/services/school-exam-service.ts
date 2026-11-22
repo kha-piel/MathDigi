@@ -620,7 +620,7 @@ function buildFallbackSections(exam: SchoolExamPaper) {
       sectionId: `${exam.examId}-section-3`,
       partCode: 'short_answer' as const,
       title: 'Phần III. Trả lời ngắn',
-      instructions: 'Nhap đáp án vao o trong.',
+      instructions: 'Nhập đáp án vào ô trống.',
       startQuestionNumber: exam.shortAnswerQuestions[0]?.questionNumber ?? 0,
       endQuestionNumber:
         exam.shortAnswerQuestions[exam.shortAnswerQuestions.length - 1]?.questionNumber ?? 0,
