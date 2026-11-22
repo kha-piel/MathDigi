@@ -16,6 +16,12 @@ pg_dump "$SUPABASE_DB_URL" -Fc -f mathdigi-before-math-only.dump
 psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f web-app/supabase/migrations/20261122000_math_only_precheck.sql
 ```
 
+**Before 003/004:** apply `../security_hardening_phase0.sql` first. 003 and 004 reuse
+`current_user_is_school_exam_admin()`; without Phase 0 that helper is the old one from
+`setup_school_exam_admin_policies.sql`, which also grants admin by profile email and to
+anyone signed in as `admin@local.test`. Then apply **005** (exam-import admin check:
+only status `active` passes) after `../migrate_phase4_exam_import.sql`.
+
 Review raw exam subject counts, FK-dependent counts, subjects/topics/legacy counts,
 Storage prefixes and table columns. Apply complete files **000 → 001 → 002 → 003
 → 004**, with the same psql command (change filename), or execute each entire file
@@ -39,7 +45,7 @@ in SQL Editor. Every file is one transaction.
 
 ## Rollback
 
-Stop writes; apply matching files in `../rollback/` in reverse: **004 → 003 → 002
+Stop writes; apply matching files in `../rollback/` in reverse: **005 → 004 → 003 → 002
 → 001**. Rollback 004 refuses a nonempty bank. To explicitly back up its rows to
 `math_only_backup.question_bank_rows` and drop it, set this in the **same session**
 (not a psql variable):

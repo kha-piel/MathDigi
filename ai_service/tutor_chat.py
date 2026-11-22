@@ -14,15 +14,15 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 
+from auth import _supabase_config
+
 _tokens: dict[str, tuple[float, str]] = {}
 
 
 async def verify_user(authorization: str | None = Header(default=None)) -> str:
     if not authorization or not authorization.startswith('Bearer '):
         raise HTTPException(401, 'Vui lòng đăng nhập để hỏi gia sư.')
-    url, key = os.getenv('SUPABASE_URL'), os.getenv('SUPABASE_ANON_KEY')
-    if not url or not key:
-        raise HTTPException(503, 'Gia sư chưa được cấu hình. Vui lòng thử lại sau.')
+    url, key = _supabase_config()
     digest = hashlib.sha256(authorization.encode()).hexdigest()
     now = time.monotonic()
     cached = _tokens.get(digest)
