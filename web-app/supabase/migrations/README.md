@@ -47,7 +47,7 @@ in SQL Editor. Every file is one transaction.
 
 ## Rollback
 
-Stop writes; apply matching files in `../rollback/` in reverse: **006 → 005 → 004 → 003 → 002
+Stop writes; apply matching files in `../rollback/` in reverse: **004 → 003 → 002
 → 001**. Rollback 004 refuses a nonempty bank. To explicitly back up its rows to
 `math_only_backup.question_bank_rows` and drop it, set this in the **same session**
 (not a psql variable):
@@ -107,3 +107,7 @@ adds live-shaped subjects/topics plus legacy FK fixtures, tests RLS/reruns/error
 and compares public schema plus every public/auth/storage table checksum after
 full reverse rollback. Container/port are random and cleaned on exit. Storage
 tests use only a local HTTP mock.
+
+Roll back **006** (`../rollback/20261122006_phase4_import_admin_active_status_rollback.sql`)
+before any other file: it restores the NULL-status-as-active import check and drops only
+the phase4 visibility policies 006 re-created.
