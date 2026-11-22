@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { setTutorContext, clearTutorContext, setTutorDisabled, TUTOR_EXAM_DISABLED } from '../../features/tutor-chat/store'
+import { resolveTutorReviewItem } from '../../features/tutor-chat/review-context'
 import { Link, useBlocker, useParams } from 'react-router-dom'
 import { PageCard } from '../../components/ui/PageCard'
 import { MarkdownContent } from '../../components/ui/MarkdownContent'
@@ -76,12 +78,20 @@ export function SchoolExamPage() {
   const [weaknessAnalysisError, setWeaknessAnalysisError] = useState('')
 
   const [selectedReviewQuestionNumber, setSelectedReviewQuestionNumber] = useState<number | null>(null)
+  const [practiceTutorQuestionNumber, setPracticeTutorQuestionNumber] = useState<number | null>(null)
   const [selectedReviewChatInput, setSelectedReviewChatInput] = useState('')
   const [aiChatHistoryByQuestion, setAiChatHistoryByQuestion] = useState<Record<number, ReviewChatMessage[]>>({})
   const [isSavingAttempt, setIsSavingAttempt] = useState(false)
   const [schoolAttemptId, setSchoolAttemptId] = useState('')
   const [isConfirmSubmitOpen, setIsConfirmSubmitOpen] = useState(false)
   const startedAtRef = useRef(Date.now())
+  const lastTutorReviewQuestionNumber = useRef<number | null>(null)
+
+  const tutorExamRunning = Boolean(exam && exam.durationMinutes > 0 && !submitted)
+  useEffect(() => {
+    setTutorDisabled(tutorExamRunning ? TUTOR_EXAM_DISABLED : null)
+    return () => setTutorDisabled(null)
+  }, [tutorExamRunning])
 
   useEffect(() => {
     let isMounted = true
@@ -106,6 +116,8 @@ export function SchoolExamPage() {
         setRecommendedTopics([])
         setWeaknessAnalysisError('')
         setSelectedReviewQuestionNumber(null)
+        setPracticeTutorQuestionNumber(null)
+        lastTutorReviewQuestionNumber.current = null
         setSelectedReviewChatInput('')
         setAiChatHistoryByQuestion({})
         setSchoolAttemptId('')
@@ -443,6 +455,34 @@ export function SchoolExamPage() {
     }
     return reviewItems.find((item) => item.questionNumber === selectedReviewQuestionNumber) ?? null
   }, [reviewItems, selectedReviewQuestionNumber])
+
+  useEffect(() => {
+    if (selectedReviewItem) lastTutorReviewQuestionNumber.current = selectedReviewItem.questionNumber
+    const item = submitted
+      ? resolveTutorReviewItem(reviewItems, selectedReviewItem?.questionNumber ?? null, lastTutorReviewQuestionNumber.current)
+      : resolveTutorReviewItem(reviewItems, practiceTutorQuestionNumber, null)
+    if ((submitted || (exam && exam.durationMinutes <= 0)) && item) setTutorContext({
+      question_number: item.questionNumber,
+      question_content: item.questionContent,
+      options: [
+        ...item.options.map((option) => `${option.optionLabel}. ${option.optionText}`),
+        ...item.statements.map((statement) => `${statement.label}. ${statement.text}`),
+      ],
+      question_type: item.partCode,
+      topic: item.topic,
+      student_answer: item.selectedAnswer,
+      correct_answer: item.correctAnswer,
+      solution: item.explanation,
+      source: 'school_exam', exam_id: examId, attempt_id: schoolAttemptId,
+    })
+    else clearTutorContext()
+    return clearTutorContext
+  }, [selectedReviewItem, reviewItems, submitted, examId, schoolAttemptId, exam, practiceTutorQuestionNumber])
+
+  function selectTutorQuestion(questionNumber: number) {
+    if (tutorExamRunning) return
+    setPracticeTutorQuestionNumber(questionNumber)
+  }
 
   async function handleExplainWrongAnswer(item: ReviewItem) {
     if (!item.questionContent.trim()) {
@@ -803,7 +843,7 @@ export function SchoolExamPage() {
         </div>
 
         {selectedReviewItem ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
+          <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
             <div className="flex h-[92vh] w-full max-w-[1320px] flex-col overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_40px_120px_rgba(15,23,42,0.24)]">
               <div className="shrink-0 flex items-center justify-between gap-4 border-b border-slate-200 px-6 py-5">
                 <div>
@@ -1100,6 +1140,8 @@ export function SchoolExamPage() {
                     return (
                       <article
                         key={questionNumber}
+                        onClick={() => selectTutorQuestion(questionNumber)}
+                        onFocusCapture={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
@@ -1157,6 +1199,8 @@ export function SchoolExamPage() {
                     return (
                       <article
                         key={questionNumber}
+                        onClick={() => selectTutorQuestion(questionNumber)}
+                        onFocusCapture={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
@@ -1236,6 +1280,8 @@ export function SchoolExamPage() {
                     return (
                       <article
                         key={questionNumber}
+                        onClick={() => selectTutorQuestion(questionNumber)}
+                        onFocusCapture={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
@@ -1696,4 +1742,3 @@ const styles = {
     color: '#5d7491',
   },
 }
-

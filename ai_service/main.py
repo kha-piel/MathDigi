@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
+from tutor_chat import create_tutor_router
 
 from auth import current_user, require_admin
 
@@ -44,6 +45,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["Retry-After"],
 )
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -55,6 +57,7 @@ if not GEMINI_API_KEY:
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 MODEL_NAME = "gemini-2.5-flash"
+app.include_router(create_tutor_router(client, MODEL_NAME))
 BASE_VAULT_PATH = Path(__file__).resolve().parent.parent / "docs" / "knowledge-base"
 PDF_TEXT_EXTRACTION_MIN_CHARS = 99999999 # Force Gemini File API for all PDFs to avoid mojibake
 logger = logging.getLogger("ai_service.admin_import")
