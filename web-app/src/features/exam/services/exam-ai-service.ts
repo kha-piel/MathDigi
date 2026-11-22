@@ -1,4 +1,5 @@
 import { env } from '../../../lib/config/env'
+import { getAuthorizationHeader } from '../../../lib/supabase/client'
 
 type ExplainRequest = {
   questionContent: string
@@ -109,11 +110,13 @@ function buildStudentAnswerPayload(prompt: string, selectedAnswer: string, syste
 }
 
 async function callAiEndpoint(path: string, payload: unknown) {
+  const authorizationHeader = await getAuthorizationHeader()
   try {
     return await fetch(`${env.aiApiBaseUrl}${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authorizationHeader,
       },
       body: JSON.stringify(payload),
     })

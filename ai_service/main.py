@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
+
+from auth import current_user, require_admin
 
 logging.basicConfig(level=logging.INFO)
 
@@ -30,12 +32,18 @@ app = FastAPI(
     version="1.1.0",
 )
 
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -277,8 +285,11 @@ def read_knowledge_context(relative_path: str) -> str:
     if not normalized:
         return ""
 
-    file_path = BASE_VAULT_PATH / normalized
-    if not file_path.exists() or not file_path.is_file():
+    vault_root = BASE_VAULT_PATH.resolve()
+    file_path = (vault_root / normalized).resolve()
+    if not file_path.is_relative_to(vault_root) or file_path.suffix.lower() != ".md":
+        return ""
+    if not file_path.is_file():
         return ""
 
     return file_path.read_text(encoding="utf-8")
@@ -1228,7 +1239,7 @@ async def healthcheck():
     }
 
 
-@app.post("/api/explain")
+@app.post("/api/explain", dependencies=[Depends(current_user)])
 async def explain_answer(request: QuestionRequest):
     knowledge_context = read_knowledge_context(request.obsidian_source_path)
     knowledge_section = build_knowledge_section(knowledge_context)
@@ -1257,7 +1268,7 @@ async def explain_answer(request: QuestionRequest):
     }
 
 
-@app.post("/api/analyze-weaknesses")
+@app.post("/api/analyze-weaknesses", dependencies=[Depends(current_user)])
 async def analyze_weaknesses(request: WeaknessAnalysisRequest):
     if not request.wrong_questions:
         return {
@@ -1287,7 +1298,7 @@ async def analyze_weaknesses(request: WeaknessAnalysisRequest):
     }
 
 
-@app.post("/api/admin/validate-exam")
+@app.post("/api/admin/validate-exam", dependencies=[Depends(require_admin)])
 async def validate_exam(request: ValidateExamRequest):
     cleaned_content = request.content.strip()
     if not cleaned_content:
@@ -1302,7 +1313,7 @@ async def validate_exam(request: ValidateExamRequest):
     return response.model_dump(by_alias=True)
 
 
-@app.post("/api/admin/import-exam-pdf/validate")
+@app.post("/api/admin/import-exam-pdf/validate", dependencies=[Depends(require_admin)])
 async def validate_exam_pdf(
     pdf_file: UploadFile = File(alias="pdfFile"),
     subject_code: str = Form(alias="subjectCode"),
@@ -1410,7 +1421,7 @@ async def validate_exam_pdf(
             tmp_path.unlink(missing_ok=True)
 
 
-@app.post("/api/admin/backfill-school-exam-topics")
+@app.post("/api/admin/backfill-school-exam-topics", dependencies=[Depends(require_admin)])
 async def backfill_school_exam_topics(request: TopicBackfillRequest):
     subject_code = request.subject_code.strip().upper()
     if subject_code not in IMPORT_TOPIC_OPTIONS_BY_SUBJECT:

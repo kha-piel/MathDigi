@@ -22,3 +22,13 @@ export function getSupabaseBrowserClient() {
 
   return supabaseClient
 }
+
+export async function getAuthorizationHeader(): Promise<{ Authorization: string }> {
+  const { data } = await getSupabaseBrowserClient().auth.getSession()
+  const accessToken = data.session?.access_token
+  if (!accessToken) {
+    throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
+  }
+
+  return { Authorization: `Bearer ${accessToken}` }
+}
