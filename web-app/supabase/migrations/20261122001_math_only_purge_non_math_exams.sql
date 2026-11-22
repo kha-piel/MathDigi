@@ -22,9 +22,9 @@ declare
   progress bigint;
   unknown_codes text;
 begin
-  lock table public.school_exams in share row exclusive mode;
+  lock table public.exams in share row exclusive mode;
   if exists (select 1 from math_only_backup.migration_state where key = '001') then
-    raise notice '001 already applied; before/after exams=%', (select count(*) from public.school_exams);
+    raise notice '001 already applied; before/after exams=%', (select count(*) from public.exams);
     return;
   end if;
   if exists (select 1 from math_only_backup.purge_rows) then
@@ -32,7 +32,7 @@ begin
   end if;
   for item in
     with recursive tables(rel) as (
-      select 'public.school_exams'::regclass::oid
+      select 'public.exams'::regclass::oid
       union
       select c.conrelid from tables t join pg_constraint c on c.confrelid = t.rel and c.contype = 'f'
     ) select rel from tables order by rel
@@ -40,21 +40,34 @@ begin
     execute format('lock table %s in share row exclusive mode', item.rel::regclass);
   end loop;
   insert into math_only_backup.purge_rows
-    select 'public.school_exams', tableoid::text || '/' || ctid::text, to_jsonb(e), false
-    from public.school_exams e where upper(btrim(subject_code)) = 'TOAN' and subject_code <> 'TOAN';
-  update public.school_exams set subject_code = 'TOAN'
+    select 'public.exams', tableoid::text || '/' || ctid::text, to_jsonb(e), false
+    from public.exams e where upper(btrim(subject_code)) = 'TOAN' and subject_code <> 'TOAN';
+  update public.exams set subject_code = 'TOAN'
     where upper(btrim(subject_code)) = 'TOAN' and subject_code <> 'TOAN';
   get diagnostics changed = row_count;
   raise notice '001 normalized exams=%', changed;
   select string_agg(quote_literal(subject_code), ', ' order by subject_code) into unknown_codes
-    from (select distinct subject_code from public.school_exams
+    from (select distinct subject_code from public.exams
       where subject_code not in ('TOAN','VAT_LY','HOA_HOC')) codes;
   if unknown_codes is not null then
     raise exception 'Unknown subject_code(s): %; entire transaction aborted', unknown_codes;
   end if;
   insert into math_only_backup.purge_rows
-    select 'public.school_exams', tableoid::text || '/' || ctid::text, to_jsonb(e), true
-    from public.school_exams e where subject_code <> 'TOAN';
+    select 'public.exams', tableoid::text || '/' || ctid::text, to_jsonb(e), true
+    from public.exams e where subject_code <> 'TOAN';
+  if to_regclass('public.subjects') is not null then
+    lock table public.subjects in share row exclusive mode;
+    insert into math_only_backup.purge_rows
+      select 'public.subjects', tableoid::text || '/' || ctid::text, to_jsonb(s), false
+      from public.subjects s where subject_code in ('LY','HOA','VAT_LY','HOA_HOC') and is_active is distinct from false;
+    if to_regclass('public.topics') is not null then
+      lock table public.topics in share row exclusive mode;
+      insert into math_only_backup.purge_rows
+        select 'public.topics', t.tableoid::text || '/' || t.ctid::text, to_jsonb(t), false
+        from public.topics t join public.subjects s using(subject_id)
+        where s.subject_code in ('LY','HOA','VAT_LY','HOA_HOC') and t.is_active is distinct from false;
+    end if;
+  end if;
   loop
     progress := 0;
     for item in
@@ -90,17 +103,17 @@ begin
   end loop;
   if exists (
     select 1 from math_only_backup.purge_rows b
-    join public.school_exams e on e.exam_id = b.row_data ->> 'exam_id'
+    join public.exams e on e.exam_id = b.row_data ->> 'exam_id'
     where b.will_delete and e.subject_code = 'TOAN'
-      and to_regclass(b.table_name) in ('public.school_exams'::regclass,
-        'public.school_exam_sections'::regclass, 'public.school_exam_questions'::regclass)
+      and to_regclass(b.table_name) in ('public.exams'::regclass,
+        'public.exam_sections'::regclass, 'public.questions'::regclass)
   ) or exists (
     select 1 from math_only_backup.purge_rows b
-    join public.school_exam_questions q on q.question_id = b.row_data ->> 'question_id'
-    join public.school_exams e on e.exam_id = q.exam_id
+    join public.questions q on q.question_id = b.row_data ->> 'question_id'
+    join public.exams e on e.exam_id = q.exam_id
     where b.will_delete and e.subject_code = 'TOAN'
-      and to_regclass(b.table_name) in ('public.school_exam_question_options'::regclass,
-        'public.school_exam_question_assets'::regclass)
+      and to_regclass(b.table_name) in ('public.question_options'::regclass,
+        'public.question_assets'::regclass)
   ) then
     raise exception 'FK cascade would delete math exam data; inspect cross-subject references manually';
   end if;
@@ -111,14 +124,25 @@ begin
     end if;
   end loop;
   raise notice '001 before delete exams=% non-math=%',
-    (select count(*) from public.school_exams), (select count(*) from public.school_exams where subject_code <> 'TOAN');
-  delete from public.school_exams where subject_code <> 'TOAN';
+    (select count(*) from public.exams), (select count(*) from public.exams where subject_code <> 'TOAN');
+  delete from public.exams where subject_code <> 'TOAN';
   get diagnostics changed = row_count;
-  alter table public.school_exams alter column subject_code set default 'TOAN';
-  alter table public.school_exams alter column subject_name set default 'Toán học';
-  alter table public.school_exams add constraint school_exams_subject_code_math_only_ck check (subject_code = 'TOAN');
+  if to_regclass('public.subjects') is not null then
+    if to_regclass('public.topics') is not null then
+      update public.topics t set is_active = false from public.subjects s
+      where t.subject_id = s.subject_id and s.subject_code in ('LY','HOA','VAT_LY','HOA_HOC')
+        and t.is_active is distinct from false;
+      raise notice '001 deactivated topics=%', (select count(*) from math_only_backup.purge_rows where table_name='public.topics');
+    end if;
+    update public.subjects set is_active = false
+      where subject_code in ('LY','HOA','VAT_LY','HOA_HOC') and is_active is distinct from false;
+    raise notice '001 deactivated subjects=%', (select count(*) from math_only_backup.purge_rows where table_name='public.subjects');
+  end if;
+  alter table public.exams alter column subject_code set default 'TOAN';
+  alter table public.exams alter column subject_name set default 'Toán học';
+  alter table public.exams add constraint exams_subject_code_math_only_ck check (subject_code = 'TOAN');
   insert into math_only_backup.migration_state(key, value) values ('001', jsonb_build_object('deleted_exams', changed));
-  raise notice '001 after delete exams=% deleted=%; Storage unchanged', (select count(*) from public.school_exams), changed;
+  raise notice '001 after delete exams=% deleted=%; Storage unchanged', (select count(*) from public.exams), changed;
 end $$;
 
 commit;

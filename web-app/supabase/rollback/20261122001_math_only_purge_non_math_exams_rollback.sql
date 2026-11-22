@@ -19,14 +19,14 @@ begin
     raise notice '001 rollback: already rolled back; before/after unchanged';
     return;
   end if;
-  if exists (select 1 from math_only_backup.migration_state where key = '002') then
-    raise exception 'Roll back 002 before 001';
+  if exists (select 1 from math_only_backup.migration_state where key in ('002','003','004')) then
+    raise exception 'Roll back 004, 003 and 002 before 001';
   end if;
-  raise notice '001 rollback before exams=% backup rows=%', (select count(*) from public.school_exams),
+  raise notice '001 rollback before exams=% backup rows=%', (select count(*) from public.exams),
     (select count(*) from math_only_backup.purge_rows);
-  alter table public.school_exams drop constraint if exists school_exams_subject_code_math_only_ck;
-  alter table public.school_exams alter column subject_code drop default;
-  alter table public.school_exams alter column subject_name drop default;
+  alter table public.exams drop constraint if exists exams_subject_code_math_only_ck;
+  alter table public.exams alter column subject_code drop default;
+  alter table public.exams alter column subject_name drop default;
   create temporary table restore_pending on commit drop as select * from math_only_backup.purge_rows;
   create temporary table restore_triggers on commit drop as
     select tgrelid, tgname, tgenabled from pg_trigger
@@ -76,7 +76,7 @@ begin
       case trigger_row.tgenabled when 'A' then 'always' when 'R' then 'replica' else '' end, trigger_row.tgname);
   end loop;
   delete from math_only_backup.migration_state where key = '001';
-  raise notice '001 rollback after exams=% restored rows=%; backup retained', (select count(*) from public.school_exams), restored;
+  raise notice '001 rollback after exams=% restored rows=%; backup retained', (select count(*) from public.exams), restored;
 end $$;
 
 commit;
