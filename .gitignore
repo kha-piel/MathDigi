@@ -55,3 +55,15 @@ venv/
 
 ### Misc ###
 final-project/
+
+### Secrets & local artifacts ###
+.env*
+!.env.example
+!**/.env.example
+*.env
+!*.env.example
+.codex-py/
+.idea/
+__pycache__/
+*.log
+web-app/dist/
