@@ -40,6 +40,7 @@ begin
     for entry in select * from restore_pending loop
       select string_agg(format('%I', attname), ', ' order by attnum),
         string_agg(format('%I = restored.%I', attname, attname), ', ' order by attnum)
+          filter (where attidentity <> 'a')
       into columns_sql, update_sql from pg_attribute
       where attrelid = to_regclass(entry.table_name) and attnum > 0 and not attisdropped and attgenerated = '';
       select string_agg(format('target.%I = restored.%I', a.attname, a.attname), ' and ' order by k.n)

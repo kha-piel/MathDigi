@@ -206,6 +206,18 @@ create table public.unknown_set_null (
   foreign key(a,b) references public.unknown_composite_parent(a,b) on delete set null
 );
 insert into public.unknown_set_null select exam_id,exam_id,1,exam_id || '-q1' from public.exams where exam_id like 'fixture-%';
+create table public.identity_cascade (
+  id bigint generated always as identity primary key,
+  exam_id text references public.exams(exam_id) on delete cascade,
+  exam_length integer generated always as (length(exam_id)) stored
+);
+create table public.identity_set_null (
+  id bigint generated always as identity primary key,
+  exam_id text references public.exams(exam_id) on delete set null,
+  exam_length integer generated always as (length(exam_id)) stored
+);
+insert into public.identity_cascade(exam_id) select exam_id from public.exams where exam_id like 'fixture-%';
+insert into public.identity_set_null(exam_id) select exam_id from public.exams where exam_id like 'fixture-%';
 insert into storage.objects(bucket_id,name) values
   ('school-exams','VAT_LY/2026/source.pdf'), ('school-exams','HOA_HOC/2026/source.pdf'), ('school-exams','TOAN/2026/source.pdf');
 SQL
@@ -267,6 +279,7 @@ assert_sql 'LY/HOA subjects and their topics deactivated, not deleted' "select (
 assert_sql 'legacy FK rows preserved' 'select (select count(*)=3 from public.legacy_exams) and (select count(*)=5 from public.legacy_questions)'
 assert_sql 'non-math history and transitive rows gone' "select (select count(*)=1 from public.student_attempts) and (select count(*)=1 from public.student_answers) and (select count(*)=1 from public.student_ai_messages) and (select count(*)=1 from public.unknown_answer_children)"
 assert_sql 'SET NULL rows survive with cleared composite and question FKs' "select count(*)=2 from public.unknown_set_null where a is null and b is null and question_id is null"
+assert_sql 'identity fixtures exercise CASCADE deletion and SET NULL generated-column recomputation' "select (select count(*)=1 from public.identity_cascade) and (select count(*)=2 from public.identity_set_null where exam_id is null and exam_length is null)"
 assert_sql 'Storage objects not deleted' "select count(*)=3 from storage.objects"
 reject 'math-only constraint rejects VAT_LY' 'exams_subject_code_math_only_ck' "insert into public.exams(exam_id,title,school_name,city,subject_code,subject_name,year,pdf_url) values ('bad','Bad','School','City','VAT_LY','Physics',2026,'');"
 assert_sql 'TOAN and Toán học defaults' "select (select pg_get_expr(adbin,adrelid) from pg_attrdef d join pg_attribute a on a.attrelid=d.adrelid and a.attnum=d.adnum where adrelid='public.exams'::regclass and attname='subject_code')='''TOAN''::text' and (select pg_get_expr(adbin,adrelid) from pg_attrdef d join pg_attribute a on a.attrelid=d.adrelid and a.attnum=d.adnum where adrelid='public.exams'::regclass and attname='subject_name')='''Toán học''::text'"
@@ -334,6 +347,7 @@ assert_sql 'forced bank rollback preserves all rows in backup' 'select count(*)=
 apply "$R3"
 apply "$R2"
 apply "$R1"
+assert_sql '001 rollback restores GENERATED ALWAYS identities and generated values for CASCADE and SET NULL rows' "with actual(table_name,row_data) as (select 'public.identity_cascade',to_jsonb(t) from public.identity_cascade t union all select 'public.identity_set_null',to_jsonb(t) from public.identity_set_null t) select count(*)=4 from math_only_backup.purge_rows b join actual a using(table_name,row_data) where b.table_name in ('public.identity_cascade','public.identity_set_null')"
 schema_dump "$WORK/schema.after"
 checksums > "$WORK/data.after"
 diff -u "$WORK/schema.before" "$WORK/schema.after"
@@ -359,7 +373,31 @@ alter table public.school_exam_question_assets rename to question_assets;
 create table public.subjects(subject_id uuid primary key default gen_random_uuid(),subject_code text,subject_name text,is_active boolean default true);
 insert into public.subjects(subject_code,subject_name) values ('TOAN','Toán học');
 SQL
-for file in "$PRE" "$M1" "$M2" "$M3" "$R3" "$R2" "$R1"; do
+for file in "$PRE" "$M1" "$M2" "$M3"; do
+  sql -d empty_case < "$file" >> "$WORK/empty.log" 2>&1 || { cat "$WORK/empty.log"; exit 1; }
+done
+[[ $(sql -d empty_case -Atc "select relrowsecurity and has_table_privilege('anon',oid,'SELECT') and has_table_privilege('authenticated',oid,'SELECT') and not has_table_privilege('authenticated',oid,'INSERT,UPDATE,DELETE') and not has_table_privilege('anon',oid,'INSERT,UPDATE,DELETE') from pg_class where oid='public.topics'::regclass") == t ]]
+for role in anon authenticated; do
+  sql -d empty_case -c "set role $role; select * from public.topics" > /dev/null
+  if sql -d empty_case -c "set role $role; insert into public.topics(subject_id,topic_name) select subject_id,'Forbidden' from public.topics limit 1" > "$WORK/rejected.log" 2>&1; then
+    echo "FAIL: $role can write topics without admin helper"; exit 1
+  fi
+done
+echo 'PASS: created topics without admin helper has RLS, public reads and no student writes'
+sql -d empty_case <<'SQL'
+insert into public.topics(topic_id,subject_id,topic_name,topic_slug)
+  select '10000000-0000-0000-0000-000000000001',subject_id,'Added after migration','added-later' from public.subjects;
+insert into public.exams(exam_id,title,school_name,city,year,pdf_url) values ('later-exam','Later','School','City',2026,'');
+insert into public.questions(question_id,exam_id,question_number,question_type,question_text,topic_id)
+  values ('later-question','later-exam',1,'short_answer','Later question','10000000-0000-0000-0000-000000000001');
+SQL
+sql -d empty_case -Atc "select to_jsonb(t)::text from public.topics t union all select to_jsonb(q)::text from public.questions q where topic_id is not null order by 1" > "$WORK/topics.before"
+sql -d empty_case < "$R3" >> "$WORK/empty.log" 2>&1 || { cat "$WORK/empty.log"; exit 1; }
+sql -d empty_case -Atc "select row_data::text from math_only_backup.topics_rollback_rows order by 1" > "$WORK/topics.backup"
+diff -u "$WORK/topics.before" "$WORK/topics.backup"
+[[ $(sql -d empty_case -Atc "select to_regclass('public.topics') is null and not exists (select 1 from pg_attribute where attrelid='public.questions'::regclass and attname='topic_id' and not attisdropped)") == t ]]
+echo 'PASS: 003 rollback backs up every topic and question link including post-migration additions before dropping'
+for file in "$R2" "$R1"; do
   sql -d empty_case < "$file" >> "$WORK/empty.log" 2>&1 || { cat "$WORK/empty.log"; exit 1; }
 done
 echo 'PASS: empty database, missing topics creation/rollback, absent admin helper and Storage schema'

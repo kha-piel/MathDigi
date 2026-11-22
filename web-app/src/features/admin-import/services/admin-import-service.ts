@@ -2,7 +2,7 @@ import katex from 'katex'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 import { env } from '../../../lib/config/env'
-import { getSupabaseBrowserClient } from '../../../lib/supabase/client'
+import { getAuthorizationHeader, getSupabaseBrowserClient } from '../../../lib/supabase/client'
 import { invalidateSchoolExamCaches } from '../../practice/services/school-exam-service'
 import { invalidatePracticeQuestionBankCache } from '../../practice/services/practice-service'
 
@@ -253,6 +253,7 @@ export async function requestExamPdfValidation(input: {
   formData.append('durationMinutes', input.metadata.durationMinutes)
   formData.append('answerKeyText', input.answerKeyText)
 
+  const authorizationHeader = await getAuthorizationHeader()
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => controller.abort(), 240_000)
   const statusTimers = [
@@ -271,6 +272,7 @@ export async function requestExamPdfValidation(input: {
 
   const response = await fetch(`${env.aiApiBaseUrl}/api/admin/import-exam-pdf/validate`, {
     method: 'POST',
+    headers: authorizationHeader,
     body: formData,
     signal: controller.signal,
   })

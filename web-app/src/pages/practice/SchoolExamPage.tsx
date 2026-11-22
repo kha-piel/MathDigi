@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { setTutorContext, clearTutorContext, setTutorDisabled, TUTOR_EXAM_DISABLED } from '../../features/tutor-chat/store'
+import { resolveTutorReviewItem } from '../../features/tutor-chat/review-context'
 import { Link, useBlocker, useParams } from 'react-router-dom'
 import { PageCard } from '../../components/ui/PageCard'
 import { MarkdownContent } from '../../components/ui/MarkdownContent'
@@ -76,12 +78,20 @@ export function SchoolExamPage() {
   const [weaknessAnalysisError, setWeaknessAnalysisError] = useState('')
 
   const [selectedReviewQuestionNumber, setSelectedReviewQuestionNumber] = useState<number | null>(null)
+  const [practiceTutorQuestionNumber, setPracticeTutorQuestionNumber] = useState<number | null>(null)
   const [selectedReviewChatInput, setSelectedReviewChatInput] = useState('')
   const [aiChatHistoryByQuestion, setAiChatHistoryByQuestion] = useState<Record<number, ReviewChatMessage[]>>({})
   const [isSavingAttempt, setIsSavingAttempt] = useState(false)
   const [schoolAttemptId, setSchoolAttemptId] = useState('')
   const [isConfirmSubmitOpen, setIsConfirmSubmitOpen] = useState(false)
   const startedAtRef = useRef(Date.now())
+  const lastTutorReviewQuestionNumber = useRef<number | null>(null)
+
+  const tutorExamRunning = Boolean(exam && exam.durationMinutes > 0 && !submitted)
+  useEffect(() => {
+    setTutorDisabled(tutorExamRunning ? TUTOR_EXAM_DISABLED : null)
+    return () => setTutorDisabled(null)
+  }, [tutorExamRunning])
 
   useEffect(() => {
     let isMounted = true
@@ -106,6 +116,8 @@ export function SchoolExamPage() {
         setRecommendedTopics([])
         setWeaknessAnalysisError('')
         setSelectedReviewQuestionNumber(null)
+        setPracticeTutorQuestionNumber(null)
+        lastTutorReviewQuestionNumber.current = null
         setSelectedReviewChatInput('')
         setAiChatHistoryByQuestion({})
         setSchoolAttemptId('')
@@ -113,7 +125,7 @@ export function SchoolExamPage() {
       })
       .catch((error: unknown) => {
         if (isMounted) {
-          setLoadErrorMessage(error instanceof Error ? error.message : 'Không thể tải đá» trường.')
+          setLoadErrorMessage(error instanceof Error ? error.message : 'Không thể tải đề trường.')
           setExam(null)
         }
       })
@@ -153,7 +165,7 @@ export function SchoolExamPage() {
       .catch((error: unknown) => {
         if (isMounted) {
           setLoadErrorMessage(
-            error instanceof Error ? error.message : 'Không thể tải nội dung câu há»i đá» trường.',
+            error instanceof Error ? error.message : 'Không thể tải nội dung câu hỏi đề trường.',
           )
           setQuestionRecords([])
         }
@@ -194,7 +206,7 @@ export function SchoolExamPage() {
     }
 
     const shouldLeave = window.confirm(
-      'Bai lam de thi thu cua truong se bi reset neu ban roi trang luc nay. Ban van muon thoat?',
+      'Bài làm đề thi thử của trường sẽ bị reset nếu bạn rời trang lúc này. Bạn vẫn muốn thoát?',
     )
 
     if (shouldLeave) {
@@ -324,7 +336,7 @@ export function SchoolExamPage() {
         const questionKey = String(questionNumber)
         const correctAnswer = formatAnswerKeyValue(answerKeyByQuestionNumber[questionNumber] ?? '--')
         const record = questionRecordByNumber[questionNumber]
-        const displayQuestionLabel = buildDisplayQuestionLabel(section, questionNumber)
+        const displayQuestionLabel = buildDisplayQuestionLabel(questionNumber)
         const questionContent = buildQuestionContent(record, displayQuestionLabel)
         const questionStem = record?.questionText ?? ''
         const options = record?.options ?? []
@@ -444,11 +456,39 @@ export function SchoolExamPage() {
     return reviewItems.find((item) => item.questionNumber === selectedReviewQuestionNumber) ?? null
   }, [reviewItems, selectedReviewQuestionNumber])
 
+  useEffect(() => {
+    if (selectedReviewItem) lastTutorReviewQuestionNumber.current = selectedReviewItem.questionNumber
+    const item = submitted
+      ? resolveTutorReviewItem(reviewItems, selectedReviewItem?.questionNumber ?? null, lastTutorReviewQuestionNumber.current)
+      : resolveTutorReviewItem(reviewItems, practiceTutorQuestionNumber, null)
+    if ((submitted || (exam && exam.durationMinutes <= 0)) && item) setTutorContext({
+      question_number: item.questionNumber,
+      question_content: item.questionContent,
+      options: [
+        ...item.options.map((option) => `${option.optionLabel}. ${option.optionText}`),
+        ...item.statements.map((statement) => `${statement.label}. ${statement.text}`),
+      ],
+      question_type: item.partCode,
+      topic: item.topic,
+      student_answer: item.selectedAnswer,
+      correct_answer: item.correctAnswer,
+      solution: item.explanation,
+      source: 'school_exam', exam_id: examId, attempt_id: schoolAttemptId,
+    })
+    else clearTutorContext()
+    return clearTutorContext
+  }, [selectedReviewItem, reviewItems, submitted, examId, schoolAttemptId, exam, practiceTutorQuestionNumber])
+
+  function selectTutorQuestion(questionNumber: number) {
+    if (tutorExamRunning) return
+    setPracticeTutorQuestionNumber(questionNumber)
+  }
+
   async function handleExplainWrongAnswer(item: ReviewItem) {
     if (!item.questionContent.trim()) {
       setAiErrorByQuestion((state) => ({
         ...state,
-        [item.questionNumber]: 'Chưa có nội dung câu há»i để gửi sang AI.',
+        [item.questionNumber]: 'Chưa có nội dung câu hỏi để gửi sang AI.',
       }))
       return
     }
@@ -479,7 +519,7 @@ export function SchoolExamPage() {
       await persistReviewAiMessages(item.questionNumber, [
         {
           role: 'user',
-          content: `Vi sao ${item.displayQuestionLabel.toLowerCase()} em lam sai?`,
+          content: `Vì sao ${item.displayQuestionLabel.toLowerCase()} em làm sai?`,
         },
         {
           role: 'assistant',
@@ -538,7 +578,7 @@ export function SchoolExamPage() {
       setAiErrorByQuestion((state) => ({
         ...state,
         [item.questionNumber]:
-          error instanceof Error ? error.message : 'Không thể gửi câu há»i tới AI lúc này.',
+          error instanceof Error ? error.message : 'Không thể gửi câu hỏi tới AI lúc này.',
       }))
     } finally {
       setIsAiBusyByQuestion((state) => ({ ...state, [item.questionNumber]: false }))
@@ -555,7 +595,7 @@ export function SchoolExamPage() {
 
     try {
       if (!authUser?.id) {
-        throw new Error('Khong tim thay tai khoan dang nhap de luu lich su bai lam.')
+        throw new Error('Không tìm thấy tài khoản đăng nhập để lưu lịch sử bài làm.')
       }
 
       const attemptId = await persistCompletedSchoolExamAttempt({
@@ -598,7 +638,7 @@ export function SchoolExamPage() {
       setSchoolAttemptId(attemptId)
       setSubmitted(true)
     } catch (error) {
-      setLoadErrorMessage(error instanceof Error ? error.message : 'Khong the luu lich su bai lam.')
+      setLoadErrorMessage(error instanceof Error ? error.message : 'Không thể lưu lịch sử bài làm.')
     } finally {
       setIsSavingAttempt(false)
     }
@@ -640,7 +680,7 @@ export function SchoolExamPage() {
         wrongReviewItems.map((item) => ({
           questionId: String(item.questionNumber),
           questionContent: item.questionContent || item.displayQuestionLabel,
-          topic: item.topic || exam?.subjectName || 'Chưa xác định chuyên đá»',
+          topic: item.topic || exam?.subjectName || 'Chưa xác định chuyên đề',
           userAnswer: item.selectedAnswer,
           correctAnswer: item.correctAnswer,
         })),
@@ -667,19 +707,19 @@ export function SchoolExamPage() {
 
   if (isLoadingExam) {
     return (
-      <PageCard title="Äang tải đá» trường" description="Hệ thống đang đọc metadata, PDF và danh sách mã đá» từ Supabase.">
-        <p style={styles.text}>Äang tải dữ liệu...</p>
+      <PageCard title="Đang tải đề trường" description="Hệ thống đang đọc metadata, PDF và danh sách mã đề từ Supabase.">
+        <p style={styles.text}>Đang tải dữ liệu...</p>
       </PageCard>
     )
   }
 
   if (!exam) {
     return (
-      <PageCard title="Không tìm thấy đá» trường" description="Exam id này chưa được khai báo trong kho dữ liệu.">
+      <PageCard title="Không tìm thấy đề trường" description="Exam id này chưa được khai báo trong kho dữ liệu.">
         <p style={styles.text}>
           {loadErrorMessage || 'Quay lại '}
           <Link to="/practice">practice hub</Link>
-          {!loadErrorMessage ? ' để chọn đá» khác.' : null}
+          {!loadErrorMessage ? ' để chọn đề khác.' : null}
         </p>
       </PageCard>
     )
@@ -696,25 +736,29 @@ export function SchoolExamPage() {
               </div>
               <h1 className="mt-2 text-3xl font-extrabold text-slate-950">{exam.examTitle}</h1>
               <p className="mt-2 text-sm leading-7 text-slate-600">
-                {exam.schoolName} | {exam.displayVariantCode || '--'} | Äã khóa bài làm
+                {exam.schoolName} | {exam.displayVariantCode || '--'} | Đã khóa bài làm
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <MetricPill label="Äiểm" value={`${summary.score}/10`} />
+              <MetricPill label="Điểm" value={`${summary.score}/10`} />
               <MetricPill label="Số câu đúng" value={`${summary.correctCount}/${summary.totalCount}`} />
-              <MetricPill label="Äã trả lời" value={`${summary.answeredCount}/${summary.totalCount}`} />
+              <MetricPill label="Đã trả lời" value={`${summary.answeredCount}/${summary.totalCount}`} />
             </div>
           </div>
+        </div>
+
+        <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800">
+          Đã nộp bài. Số câu đúng: {summary.correctCount}/{summary.totalCount} | Điểm tạm tính: {summary.score}/10
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr] items-start">
           <section className="sticky top-6 rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)]">
             <h2 className="text-xl font-bold text-slate-950">Thống kê nhanh</h2>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <SummaryTile label="Äúng" value={`${summary.correctCount}`} tone="emerald" />
+              <SummaryTile label="Đúng" value={`${summary.correctCount}`} tone="emerald" />
               <SummaryTile label="Sai" value={`${wrongReviewItems.length}`} tone="rose" />
-              <SummaryTile label="Bá» qua" value={`${summary.totalCount - summary.answeredCount}`} tone="slate" />
-              <SummaryTile label="Mã đá»" value={exam.displayVariantCode || '--'} tone="sky" />
+              <SummaryTile label="Bỏ qua" value={`${summary.totalCount - summary.answeredCount}`} tone="slate" />
+              <SummaryTile label="Mã đề" value={exam.displayVariantCode || '--'} tone="sky" />
             </div>
 
             <div className="mt-6 rounded-[24px] border border-slate-200 bg-slate-50 p-5">
@@ -751,7 +795,7 @@ export function SchoolExamPage() {
                 className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
                 to="/practice"
               >
-                Quay lại thư viện đá»
+                Quay lại thư viện đề
               </Link>
               <a
                 className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm font-bold text-slate-700 transition hover:border-slate-300 hover:bg-white"
@@ -771,8 +815,8 @@ export function SchoolExamPage() {
             </div>
 
             <p className="mt-3 text-sm leading-7 text-slate-600">
-              Bấm vào từng câu để mở tab review. Tab này hiện câu há»i, hình ảnh liên quan, đáp án học sinh chọn
-              va khung tro chuyen voi AI.
+              Bấm vào từng câu để mở tab review. Tab này hiện câu hỏi, hình ảnh liên quan, đáp án học sinh chọn
+              và khung trò chuyện với AI.
             </p>
 
             <div className="mt-5 space-y-5">
@@ -799,19 +843,19 @@ export function SchoolExamPage() {
         </div>
 
         {selectedReviewItem ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
+          <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
             <div className="flex h-[92vh] w-full max-w-[1320px] flex-col overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_40px_120px_rgba(15,23,42,0.24)]">
               <div className="shrink-0 flex items-center justify-between gap-4 border-b border-slate-200 px-6 py-5">
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    Review câu há»i
+                    Review câu hỏi
                   </div>
                   <h2 className="mt-2 text-2xl font-extrabold text-slate-950">
                     {selectedReviewItem.displayQuestionLabel} | {formatPartLabel(selectedReviewItem.partCode)}
                   </h2>
                 </div>
                 <button
-                  aria-label="Dong tab review"
+                  aria-label="Đóng tab review"
                   className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                   onClick={() => {
                     setSelectedReviewQuestionNumber(null)
@@ -833,7 +877,7 @@ export function SchoolExamPage() {
                           : 'bg-rose-100 text-rose-700'
                       }`}
                     >
-                      {selectedReviewItem.correct ? 'Äúng' : 'Sai'}
+                      {selectedReviewItem.correct ? 'Đúng' : 'Sai'}
                     </div>
                     <div className="text-sm leading-7 text-slate-600">
                       Topic: {selectedReviewItem.topic || 'Chưa gán topic'}
@@ -842,11 +886,11 @@ export function SchoolExamPage() {
 
                   <div className="mt-5 rounded-[24px] border border-slate-200 bg-white p-5">
                     <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                      Nội dung câu há»i
+                      Nội dung câu hỏi
                     </div>
                     <div className="mt-3 text-base leading-8 text-slate-800">
                       <MarkdownContent
-                        content={selectedReviewItem.questionStem || 'Chưa có nội dung câu há»i.'}
+                        content={selectedReviewItem.questionStem || 'Chưa có nội dung câu hỏi.'}
                         className="text-base leading-8 text-slate-800"
                       />
                     </div>
@@ -873,7 +917,7 @@ export function SchoolExamPage() {
                   {selectedReviewItem.partCode === 'multiple_choice' ? (
                     <div className="mt-5 rounded-[24px] border border-slate-200 bg-white p-5">
                       <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                        Các lựa chọn trong câu há»i
+                        Các lựa chọn trong câu hỏi
                       </div>
                       <SchoolExamChoiceReview
                         correctAnswer={selectedReviewItem.correctAnswer}
@@ -886,7 +930,7 @@ export function SchoolExamPage() {
                   {selectedReviewItem.partCode === 'true_false' ? (
                     <div className="mt-5 rounded-[24px] border border-slate-200 bg-white p-5">
                       <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                        Các mệnh đá» trong câu há»i
+                        Các mệnh đề trong câu hỏi
                       </div>
                       <SchoolExamTrueFalseReview
                         correctAnswer={selectedReviewItem.correctAnswer}
@@ -906,7 +950,7 @@ export function SchoolExamPage() {
                     </div>
                     <div className="rounded-[22px] border border-slate-200 bg-white px-4 py-4">
                       <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                        Äáp án đúng
+                        Đáp án đúng
                       </div>
                       <div className="mt-2 text-lg font-bold text-slate-950">{selectedReviewItem.correctAnswer}</div>
                     </div>
@@ -918,7 +962,7 @@ export function SchoolExamPage() {
                     <div>
                       <h3 className="text-xl font-bold text-slate-950">Trò chuyện với AI</h3>
                       <p className="mt-1 text-sm leading-6 text-slate-600">
-                        AI đọc câu há»i, đáp án đã chọn, đáp án đúng và file kiến thức liên quan để giải thích.
+                        AI đọc câu hỏi, đáp án đã chọn, đáp án đúng và file kiến thức liên quan để giải thích.
                       </p>
                     </div>
                     <button
@@ -937,7 +981,7 @@ export function SchoolExamPage() {
                     <div className="space-y-4">
                       {(aiChatHistoryByQuestion[selectedReviewItem.questionNumber] ?? []).length === 0 ? (
                         <div className="text-sm leading-7 text-slate-500">
-                          Chưa có hội thoại nào. Bấm "Giải thích câu sai" hoặc há»i thêm để AI phân tích sâu hơn.
+                          Chưa có hội thoại nào. Bấm "Giải thích câu sai" hoặc hỏi thêm để AI phân tích sâu hơn.
                         </div>
                       ) : (
                         <div className="space-y-3">
@@ -984,7 +1028,7 @@ export function SchoolExamPage() {
                           void handleSendReviewChat(selectedReviewItem)
                         }
                       }}
-                      placeholder="Há»i thêm AI vá» câu này..."
+                      placeholder="Hỏi thêm AI về câu này..."
                       type="text"
                       value={selectedReviewChatInput}
                     />
@@ -1016,7 +1060,7 @@ export function SchoolExamPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Äá» trường co PDF
+              Đề trường có PDF
             </div>
             <h1 className="mt-2 text-3xl font-extrabold text-slate-950">{exam.examTitle}</h1>
             <p className="mt-2 text-sm leading-7 text-slate-600">
@@ -1025,17 +1069,11 @@ export function SchoolExamPage() {
           </div>
           <div className="flex flex-wrap gap-3">
             <MetricPill label="Thời gian còn lại" value={formatDuration(remainingSeconds)} />
-            <MetricPill label="Äã trả lời" value={`${summary?.answeredCount ?? 0}/${summary?.totalCount ?? 0}`} />
-            <MetricPill label="Mã đá»" value={exam.displayVariantCode || '--'} />
+            <MetricPill label="Đã trả lời" value={`${summary?.answeredCount ?? 0}/${summary?.totalCount ?? 0}`} />
+            <MetricPill label="Mã đề" value={exam.displayVariantCode || '--'} />
           </div>
         </div>
       </div>
-
-      {submitted && summary ? (
-        <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800">
-          Äã nộp bài. Số câu đúng: {summary.correctCount}/{summary.totalCount} | Äiểm tạm tính: {summary.score}/10
-        </div>
-      ) : null}
 
       {loadErrorMessage ? (
         <div className="rounded-[24px] border border-rose-200 bg-rose-50 px-5 py-4 text-sm font-medium text-rose-700">
@@ -1046,7 +1084,7 @@ export function SchoolExamPage() {
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr] items-start">
         <section className="sticky top-6 rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_20px_60px_rgba(15,23,42,0.05)]">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-lg font-bold text-slate-950">Äá» gốc PDF</h2>
+            <h2 className="text-lg font-bold text-slate-950">Đề gốc PDF</h2>
             <a
               className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
               href={exam.pdfUrl}
@@ -1093,16 +1131,17 @@ export function SchoolExamPage() {
             {sectionsByPart.multipleChoice.map((section) => (
               <QuestionSection
                 key={section.sectionId}
-                description={section.instructions}
-                title={section.title}
+                section={section}
               >
                 <div className="grid gap-4">
                   {buildQuestionNumbers(section.startQuestionNumber, section.endQuestionNumber).map((questionNumber) => {
                     const questionKey = String(questionNumber)
-                    const displayQuestionLabel = buildDisplayQuestionLabel(section, questionNumber)
+                    const displayQuestionLabel = buildDisplayQuestionLabel(questionNumber)
                     return (
                       <article
                         key={questionNumber}
+                        onClick={() => selectTutorQuestion(questionNumber)}
+                        onFocusCapture={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
@@ -1137,7 +1176,7 @@ export function SchoolExamPage() {
                         </div>
                         {submitted ? (
                           <p className="mt-3 text-sm text-slate-600">
-                            Äáp án đúng: {formatAnswerKeyValue(answerKeyByQuestionNumber[questionNumber] ?? '--')}
+                            Đáp án đúng: {formatAnswerKeyValue(answerKeyByQuestionNumber[questionNumber] ?? '--')}
                           </p>
                         ) : null}
                       </article>
@@ -1150,25 +1189,26 @@ export function SchoolExamPage() {
             {sectionsByPart.trueFalse.map((section) => (
               <QuestionSection
                 key={section.sectionId}
-                description={section.instructions}
-                title={section.title}
+                section={section}
               >
                 <div className="grid gap-4">
                   {buildQuestionNumbers(section.startQuestionNumber, section.endQuestionNumber).map((questionNumber) => {
                     const questionKey = String(questionNumber)
                     const labels = buildStatementLabels(section.statementCount)
-                    const displayQuestionLabel = buildDisplayQuestionLabel(section, questionNumber)
+                    const displayQuestionLabel = buildDisplayQuestionLabel(questionNumber)
                     return (
                       <article
                         key={questionNumber}
+                        onClick={() => selectTutorQuestion(questionNumber)}
+                        onFocusCapture={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
                         <div className="overflow-hidden rounded-[18px] border border-slate-200 bg-white">
                           <div className="grid grid-cols-[72px_1fr_1fr] border-b border-slate-200 bg-slate-100 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
-                            <div className="px-4 py-3">Y</div>
-                            <div className="border-l border-slate-200 px-4 py-3 text-center">D</div>
-                            <div className="border-l border-slate-200 px-4 py-3 text-center">S</div>
+                            <div className="px-4 py-3">Ý</div>
+                            <div className="border-l border-slate-200 px-4 py-3 text-center">Đúng</div>
+                            <div className="border-l border-slate-200 px-4 py-3 text-center">Sai</div>
                           </div>
                           {labels.map((label) => {
                             const selected = selectedTrueFalse[questionKey]?.[label]
@@ -1218,7 +1258,7 @@ export function SchoolExamPage() {
                         </div>
                         {submitted ? (
                           <p className="mt-3 text-sm text-slate-600">
-                            Äáp án đúng: {formatAnswerKeyValue(answerKeyByQuestionNumber[questionNumber] ?? '--')}
+                            Đáp án đúng: {formatAnswerKeyValue(answerKeyByQuestionNumber[questionNumber] ?? '--')}
                           </p>
                         ) : null}
                       </article>
@@ -1231,16 +1271,17 @@ export function SchoolExamPage() {
             {sectionsByPart.shortAnswer.map((section) => (
               <QuestionSection
                 key={section.sectionId}
-                description={section.instructions}
-                title={section.title}
+                section={section}
               >
                 <div className="grid gap-4 sm:grid-cols-2">
                   {buildQuestionNumbers(section.startQuestionNumber, section.endQuestionNumber).map((questionNumber) => {
                     const questionKey = String(questionNumber)
-                    const displayQuestionLabel = buildDisplayQuestionLabel(section, questionNumber)
+                    const displayQuestionLabel = buildDisplayQuestionLabel(questionNumber)
                     return (
                       <article
                         key={questionNumber}
+                        onClick={() => selectTutorQuestion(questionNumber)}
+                        onFocusCapture={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
@@ -1253,13 +1294,13 @@ export function SchoolExamPage() {
                               [questionKey]: event.target.value,
                             }))
                           }
-                          placeholder="Nhap đáp án..."
+                          placeholder="Nhập đáp án..."
                           type="text"
                           value={shortAnswers[questionKey] ?? ''}
                         />
                         {submitted ? (
                           <p className="mt-3 text-sm text-slate-600">
-                            Äáp án đúng: {formatAnswerKeyValue(answerKeyByQuestionNumber[questionNumber] ?? '--')}
+                            Đáp án đúng: {formatAnswerKeyValue(answerKeyByQuestionNumber[questionNumber] ?? '--')}
                           </p>
                         ) : null}
                       </article>
@@ -1334,7 +1375,7 @@ function SchoolExamChoiceReview({
   if (choices.length === 0) {
     return (
       <p className="mt-3 text-sm leading-7 text-slate-500">
-        Chưa tách được phương án A/B/C/D từ dữ liệu câu há»i.
+        Chưa tách được phương án A/B/C/D từ dữ liệu câu hỏi.
       </p>
     )
   }
@@ -1363,7 +1404,7 @@ function SchoolExamChoiceReview({
               ) : null}
               {isCorrect ? (
                 <span className="rounded-full bg-emerald-200 px-2 py-1 text-[11px] font-bold text-emerald-800">
-                  Äáp án đúng
+                  Đáp án đúng
                 </span>
               ) : null}
             </div>
@@ -1390,7 +1431,7 @@ function SchoolExamTrueFalseReview({
   if (statements.length === 0) {
     return (
       <p className="mt-3 text-sm leading-7 text-slate-500">
-        Chưa tách được các mệnh đá» a/b/c/d từ dữ liệu câu há»i.
+        Chưa tách được các mệnh đề a/b/c/d từ dữ liệu câu hỏi.
       </p>
     )
   }
@@ -1418,7 +1459,7 @@ function SchoolExamTrueFalseReview({
                 Bạn chọn: {formatTrueFalseLetter(studentValue)}
               </span>
               <span className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-bold text-emerald-800">
-                Äáp án đúng: {formatTrueFalseLetter(correctValue)}
+                Đáp án đúng: {formatTrueFalseLetter(correctValue)}
               </span>
             </div>
             <MarkdownContent content={statement.text} className="text-sm leading-7" />
@@ -1431,7 +1472,7 @@ function SchoolExamTrueFalseReview({
 
 function formatTrueFalseLetter(value: string) {
   if (value === 'D') {
-    return 'Äúng'
+    return 'Đúng'
   }
   if (value === 'S') {
     return 'Sai'
@@ -1453,47 +1494,52 @@ function MetricPill({ label, value }: { label: string; value: string }) {
   )
 }
 
-function formatSectionTitle(title: string) {
-  const lower = title.toLowerCase()
-  if (lower.includes('phan i') || lower.includes('nhieu lua chon')) {
-    return 'Phần I. Trắc nghiệm nhiều lựa chọn'
-  }
-  if (lower.includes('phan ii') || lower.includes('dung sai')) {
-    return 'Phần II. Trắc nghiệm đúng sai'
-  }
-  if (lower.includes('phan iii') || lower.includes('tra loi ngan')) {
-    return 'Phần III. Trả lời ngắn'
-  }
-  return title
+type SchoolExamSection = SchoolExamPaperRecord['sections'][number]
+
+const SECTION_TITLES: Record<SchoolExamSection['partCode'], string> = {
+  multiple_choice: 'Phần I. Trắc nghiệm nhiều lựa chọn',
+  true_false: 'Phần II. Trắc nghiệm đúng sai',
+  short_answer: 'Phần III. Trả lời ngắn',
 }
 
-function formatSectionDescription(description: string) {
-  if (description.toLowerCase().includes('moi cau chon 1 trong 4')) {
-    return 'Mỗi câu chọn 1 trong 4 đáp án.'
+function hasVietnameseDiacritics(text: string) {
+  return /[^ -~\s]/.test(text)
+}
+
+function formatSectionTitle(section: SchoolExamSection) {
+  return SECTION_TITLES[section.partCode] ?? section.title
+}
+
+function formatSectionDescription(section: SchoolExamSection) {
+  if (hasVietnameseDiacritics(section.instructions)) {
+    return section.instructions
   }
-  if (description.toLowerCase().includes('moi y (a), (b), (c), (d)')) {
-    return 'Trong mỗi câu, thí sinh chọn đúng hoặc sai.'
+
+  const range = `Câu ${section.startQuestionNumber} đến ${section.endQuestionNumber}`
+  switch (section.partCode) {
+    case 'multiple_choice':
+      return `${range}, mỗi câu chọn 1 trong ${section.optionsPerQuestion || 4} đáp án.`
+    case 'true_false':
+      return `${range}, mỗi câu có ${section.statementCount || 4} ý, chọn Đúng hoặc Sai cho từng ý.`
+    case 'short_answer':
+      return `${range}, điền đáp án vào ô trống.`
+    default:
+      return section.instructions
   }
-  if (description.toLowerCase().includes('thi sinh dien dap an')) {
-    return 'Thí sinh điền đáp án.'
-  }
-  return description
 }
 
 function QuestionSection({
-  title,
-  description,
+  section,
   children,
 }: {
-  title: string
-  description: string
+  section: SchoolExamSection
   children: ReactNode
 }) {
   return (
     <section>
       <div className="mb-4">
-        <h3 className="text-lg font-bold text-slate-950">{formatSectionTitle(title)}</h3>
-        <p className="mt-1 text-sm leading-6 text-slate-600">{formatSectionDescription(description)}</p>
+        <h3 className="text-lg font-bold text-slate-950">{formatSectionTitle(section)}</h3>
+        <p className="mt-1 text-sm leading-6 text-slate-600">{formatSectionDescription(section)}</p>
       </div>
       {children}
     </section>
@@ -1538,7 +1584,7 @@ function ReviewItemSection({
           >
             <div className="text-sm font-bold">{item.displayQuestionLabel}</div>
             <div className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] opacity-80">
-              {item.correct ? 'Äúng' : 'Sai'} | {formatPartLabel(item.partCode)}
+              {item.correct ? 'Đúng' : 'Sai'} | {formatPartLabel(item.partCode)}
             </div>
           </button>
         ))}
@@ -1604,7 +1650,7 @@ function formatPartLabel(partCode: ReviewItem['partCode']) {
     case 'multiple_choice':
       return 'Trắc nghiệm'
     case 'true_false':
-      return 'Äúng / Sai'
+      return 'Đúng / Sai'
     case 'short_answer':
       return 'Trả lời ngắn'
     default:
@@ -1612,12 +1658,8 @@ function formatPartLabel(partCode: ReviewItem['partCode']) {
   }
 }
 
-function buildDisplayQuestionLabel(
-  section: SchoolExamPaperRecord['sections'][number],
-  questionNumber: number,
-) {
-  const localQuestionNumber = questionNumber - section.startQuestionNumber + 1
-  return `Câu ${localQuestionNumber}`
+function buildDisplayQuestionLabel(questionNumber: number) {
+  return `Câu ${questionNumber}`
 }
 
 function buildQuestionContent(record: SchoolExamQuestionRecord | undefined, displayQuestionLabel: string) {
@@ -1700,4 +1742,3 @@ const styles = {
     color: '#5d7491',
   },
 }
-

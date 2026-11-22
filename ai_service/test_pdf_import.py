@@ -20,6 +20,20 @@ FORM = {
 
 
 class PdfImportTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        override = patch.dict(main.app.dependency_overrides, {main.require_admin: lambda: {"id": "test-admin"}})
+        override.start()
+        self.addCleanup(override.stop)
+
+    async def test_upload_requires_admin_authentication(self):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://testserver") as api:
+            with patch.dict(main.app.dependency_overrides, clear=True), patch.object(main, "analyze_pdf") as analyze:
+                response = await api.post("/api/admin/import-exam-pdf/validate", data=FORM, files={
+                    "pdfFile": (SAMPLE.name, SAMPLE.read_bytes(), "application/pdf"),
+                })
+        self.assertEqual(response.status_code, 401)
+        analyze.assert_not_called()
+
     def test_text_layer_does_not_upload_the_original_pdf(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "text.pdf"

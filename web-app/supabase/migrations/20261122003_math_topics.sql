@@ -39,7 +39,6 @@ begin
       updated_at timestamptz default timezone('utc', now())
     );
     grant select on public.topics to anon,authenticated;
-    grant insert,update,delete on public.topics to authenticated;
   end if;
   lock table public.topics, public.questions in share row exclusive mode;
   select relrowsecurity into enabled_before from pg_class where oid = 'public.topics'::regclass;
@@ -97,14 +96,17 @@ begin
       case state->>'enabled' when 'A' then 'always' when 'R' then 'replica' else '' end, state->>'name');
   end loop;
   if not enabled_before then
-    if to_regprocedure('public.current_user_is_school_exam_admin()') is not null then
+    if created_topics or to_regprocedure('public.current_user_is_school_exam_admin()') is not null then
       alter table public.topics enable row level security;
       create policy math_topics_public_select on public.topics for select using (true);
+      added_policies := true;
+    end if;
+    if to_regprocedure('public.current_user_is_school_exam_admin()') is not null then
+      if created_topics then grant insert,update,delete on public.topics to authenticated; end if;
       create policy math_topics_admin_write on public.topics for all to authenticated
         using (public.current_user_is_school_exam_admin()) with check (public.current_user_is_school_exam_admin());
-      added_policies := true;
     else
-      raise notice '003 admin helper missing; skipping topics RLS changes';
+      raise notice '003 admin helper missing; no topic write policy or write grants added';
     end if;
   end if;
   insert into math_only_backup.migration_state(key,value) values ('003', jsonb_build_object(
