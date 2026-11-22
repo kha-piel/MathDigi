@@ -1454,19 +1454,15 @@ function MetricPill({ label, value }: { label: string; value: string }) {
 }
 
 function formatSectionTitle(title: string) {
-  const normalized = title
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/gi, 'd')
-    .toLowerCase()
-  if (/\bphan iii\b/.test(normalized) || normalized.includes('tra loi ngan')) {
-    return 'Phần III. Trả lời ngắn'
+  const lower = title.toLowerCase()
+  if (lower.includes('phan i') || lower.includes('nhieu lua chon')) {
+    return 'Phần I. Trắc nghiệm nhiều lựa chọn'
   }
-  if (/\bphan ii\b/.test(normalized) || /dung\s*\/?\s*sai/.test(normalized)) {
+  if (lower.includes('phan ii') || lower.includes('dung sai')) {
     return 'Phần II. Trắc nghiệm đúng sai'
   }
-  if (/\bphan i\b/.test(normalized) || normalized.includes('nhieu lua chon')) {
-    return 'Phần I. Trắc nghiệm nhiều lựa chọn'
+  if (lower.includes('phan iii') || lower.includes('tra loi ngan')) {
+    return 'Phần III. Trả lời ngắn'
   }
   return title
 }
