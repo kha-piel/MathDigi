@@ -241,13 +241,15 @@ BEGIN
     SELECT 1
     FROM supplemental_math_import AS legacy
     LEFT JOIN public.question_bank AS bank USING (question_id)
-    WHERE bank.topic_id IS NULL
+    LEFT JOIN public.topics AS topic ON topic.topic_id = bank.topic_id
+    LEFT JOIN public.subjects AS subject ON subject.subject_id = topic.subject_id
+    WHERE subject.subject_code IS DISTINCT FROM 'TOAN'
        OR (SELECT count(*) FROM public.question_bank_options AS options
            WHERE options.question_id = legacy.question_id) <> 4
        OR NOT EXISTS (SELECT 1 FROM public.question_bank_options AS options
                       WHERE options.question_id = legacy.question_id AND options.option_label = bank.correct_answer)
   ) THEN
-    RAISE EXCEPTION 'Supplemental import has a missing question, topic, option or answer; no rows imported';
+    RAISE EXCEPTION 'Supplemental import has a missing question, math topic, option or answer; no rows imported';
   END IF;
 END
 $verify_import$;
