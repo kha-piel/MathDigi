@@ -33,7 +33,7 @@ test('context-dependent question detection covers numbered and relative referenc
     'Với miền ở câu 29, GTLN của $F=x-y$ bằng', 'Sử dụng câu 29 để tính.',
     'Dùng dữ kiện ở câu trên.', 'Dựa vào câu trước.', 'Câu hỏi trên cho kết quả nào?',
     'Kết quả câu trước là gì?', 'Dữ kiện câu trên cho biết điều gì?',
-    'THEO KET QUA CAU 29', 'DỮ KIỆN CỦA CÂU HỎI TRƯỚC',
+    'THEO KET QUA CÂU 29', 'DỮ KIỆN CỦA CÂU HỎI TRƯỚC',
     'Câu 30. Sử dụng kết quả câu 29.', 'Theo dữ kiện ở câu hỏi số 29.',
   ]) assert.equal(isContextDependentQuestion(text, 30), true, text)
 })
@@ -52,6 +52,18 @@ test('standalone questions, TF labels and own question numbers are not dependenc
   assert.equal(isContextDependentQuestion('Câu 29\nTính diện tích miền.'), false)
   assert.equal(isContextDependentQuestion('Câu 29'), false)
   assert.equal(isContextDependentQuestion('Câu 29. Dùng kết quả câu 28.', 29), true)
+})
+
+test('question references preserve the distinction between câu and cầu', () => {
+  for (const text of [
+    'Tính diện tích mặt cầu trên.', 'Diện tích mặt CẦU TRÊN bằng bao nhiêu?',
+    'Tính thể tích khối cầu trước khi thay đổi bán kính.',
+    'Có một mặt cầu 29 đơn vị diện tích.', 'Nhu cầu trên là 29 sản phẩm.',
+    'Tìm phương án thỏa mãn yêu cầu trên.', 'Tính diện tích mặt cau tren.',
+    'THEO KET QUA CAU 29',
+  ]) assert.equal(isContextDependentQuestion(text), false, text)
+  assert.equal(isContextDependentQuestion('Từ mặt cầu trên, dùng kết quả Câu 29.', 30), true)
+  assert.equal(isContextDependentQuestion('Dùng dữ kiện CÂU TRƯỚC.'.normalize('NFD')), true)
 })
 
 test('balanced and random mock pools exclude dependent questions without mutating the source', () => {

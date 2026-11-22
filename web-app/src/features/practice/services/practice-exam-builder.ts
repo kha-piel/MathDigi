@@ -37,11 +37,14 @@ export function contentFingerprint(type: string, text: string, options: string[]
 }
 
 export function isContextDependentQuestion(content: string, ownQuestionNumber?: number) {
-  const normalized = content.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  const questionMarker = '\uE000'
+  const normalized = content.normalize('NFC').toLowerCase()
+    .replace(/(?<![\p{L}\p{N}_])câu(?![\p{L}\p{N}_])/gu, questionMarker)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\bcau\b/g, 'nonquestion').replaceAll(questionMarker, 'cau')
     .replace(/[đĐ]/g, 'd').toLowerCase().trim()
     .replace(/^(?:#{1,6}\s*)?(?:\*\*)?cau(?: hoi)?\s+\d+[ \t]*(?:\*\*)?[ \t]*(?:[.:)]|\r?\n|$)\s*/, '')
     .replace(/\s+/g, ' ')
-    .replace(/\b(?:yeu|nhu) cau\b/g, 'request')
   let referencesAnotherNumber = false
   const withoutNumbers = normalized.replace(/\bcau(?: hoi)?\s+(?:so\s+)?(\d+)\b/g, (_match, number: string) => {
     if (Number(number) !== ownQuestionNumber) referencesAnotherNumber = true
