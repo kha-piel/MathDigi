@@ -64,6 +64,6 @@ async def require_admin(user: dict[str, str] = Depends(current_user)) -> dict[st
 
     rows = response.json() if response.status_code == 200 else []
     profile = rows[0] if isinstance(rows, list) and rows else {}
-    if profile.get("role") not in ADMIN_ROLES or (profile.get("status") or "active") != "active":
+    if profile.get("role") not in ADMIN_ROLES or profile.get("status") != "active":
         raise HTTPException(status_code=403, detail="Chi admin/teacher duoc dung chuc nang nay.")
     return user
