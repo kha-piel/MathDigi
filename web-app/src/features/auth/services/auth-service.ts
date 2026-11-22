@@ -159,24 +159,35 @@ export async function getCachedAuthUserSummary(): Promise<AuthUserSummary | null
 
 export function onAuthStateChange(callback: (user: AuthUserSummary | null) => void) {
   const supabase = getSupabaseBrowserClient()
+  let revision = 0
+  let isSubscribed = true
   const {
     data: { subscription },
-  } = supabase.auth.onAuthStateChange(async (_event, session) => {
+  } = supabase.auth.onAuthStateChange((_event, session) => {
+    const eventRevision = ++revision
     const authUser = session?.user
     if (!authUser) {
       callback(null)
       return
     }
 
-    try {
-      const summary = await resolveUserSummary(authUser)
-      callback(summary)
-    } catch {
-      callback(buildFallbackSummary(authUser))
-    }
+    window.setTimeout(() => {
+      if (!isSubscribed || eventRevision !== revision) {
+        return
+      }
+
+      void resolveUserSummary(authUser)
+        .catch(() => buildFallbackSummary(authUser))
+        .then((summary) => {
+          if (isSubscribed && eventRevision === revision) {
+            callback(summary)
+          }
+        })
+    }, 0)
   })
 
   return () => {
+    isSubscribed = false
     subscription.unsubscribe()
   }
 }

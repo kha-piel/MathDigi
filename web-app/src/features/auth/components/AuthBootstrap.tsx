@@ -27,6 +27,7 @@ export function AuthBootstrap({ children }: AuthBootstrapProps) {
 
     let isMounted = true
     let hasResolvedBootstrap = false
+    let hasReceivedAuthState = false
 
     const finishAsAnonymous = (message?: string) => {
       if (!isMounted) {
@@ -55,6 +56,7 @@ export function AuthBootstrap({ children }: AuthBootstrapProps) {
         return
       }
 
+      hasReceivedAuthState = true
       if (user) {
         finishAsAuthenticated(user)
       } else {
@@ -87,7 +89,7 @@ export function AuthBootstrap({ children }: AuthBootstrapProps) {
 
     void getCurrentAuthUserSummary()
       .then((user) => {
-        if (!isMounted) {
+        if (!isMounted || hasReceivedAuthState) {
           return
         }
 

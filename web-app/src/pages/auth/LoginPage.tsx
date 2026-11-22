@@ -1,11 +1,10 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { AuthShell } from '../../features/auth/components/AuthShell'
 import { loginWithIdentity } from '../../features/auth/services/auth-service'
 import { useAuthSessionStore } from '../../features/auth/store/auth-session-store'
 
 export function LoginPage() {
-  const navigate = useNavigate()
   const globalErrorMessage = useAuthSessionStore((state) => state.errorMessage)
   const [identity, setIdentity] = useState('')
   const [password, setPassword] = useState('')
@@ -25,7 +24,6 @@ export function LoginPage() {
 
     try {
       await loginWithIdentity(identity, password)
-      navigate('/home', { replace: true })
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Đăng nhập thất bại.')
     } finally {
