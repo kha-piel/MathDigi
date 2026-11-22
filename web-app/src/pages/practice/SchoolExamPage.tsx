@@ -194,7 +194,7 @@ export function SchoolExamPage() {
     }
 
     const shouldLeave = window.confirm(
-      'Bai lam de thi thu cua truong se bi reset neu ban roi trang luc nay. Ban van muon thoat?',
+      'Bài làm đề thi thử của trường sẽ bị reset nếu bạn rời trang lúc này. Bạn vẫn muốn thoát?',
     )
 
     if (shouldLeave) {
@@ -324,7 +324,7 @@ export function SchoolExamPage() {
         const questionKey = String(questionNumber)
         const correctAnswer = formatAnswerKeyValue(answerKeyByQuestionNumber[questionNumber] ?? '--')
         const record = questionRecordByNumber[questionNumber]
-        const displayQuestionLabel = buildDisplayQuestionLabel(section, questionNumber)
+        const displayQuestionLabel = buildDisplayQuestionLabel(questionNumber)
         const questionContent = buildQuestionContent(record, displayQuestionLabel)
         const questionStem = record?.questionText ?? ''
         const options = record?.options ?? []
@@ -479,7 +479,7 @@ export function SchoolExamPage() {
       await persistReviewAiMessages(item.questionNumber, [
         {
           role: 'user',
-          content: `Vi sao ${item.displayQuestionLabel.toLowerCase()} em lam sai?`,
+          content: `Vì sao ${item.displayQuestionLabel.toLowerCase()} em làm sai?`,
         },
         {
           role: 'assistant',
@@ -555,7 +555,7 @@ export function SchoolExamPage() {
 
     try {
       if (!authUser?.id) {
-        throw new Error('Khong tim thay tai khoan dang nhap de luu lich su bai lam.')
+        throw new Error('Không tìm thấy tài khoản đăng nhập để lưu lịch sử bài làm.')
       }
 
       const attemptId = await persistCompletedSchoolExamAttempt({
@@ -598,7 +598,7 @@ export function SchoolExamPage() {
       setSchoolAttemptId(attemptId)
       setSubmitted(true)
     } catch (error) {
-      setLoadErrorMessage(error instanceof Error ? error.message : 'Khong the luu lich su bai lam.')
+      setLoadErrorMessage(error instanceof Error ? error.message : 'Không thể lưu lịch sử bài làm.')
     } finally {
       setIsSavingAttempt(false)
     }
@@ -707,6 +707,10 @@ export function SchoolExamPage() {
           </div>
         </div>
 
+        <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800">
+          Đã nộp bài. Số câu đúng: {summary.correctCount}/{summary.totalCount} | Điểm tạm tính: {summary.score}/10
+        </div>
+
         <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr] items-start">
           <section className="sticky top-6 rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)]">
             <h2 className="text-xl font-bold text-slate-950">Thống kê nhanh</h2>
@@ -772,7 +776,7 @@ export function SchoolExamPage() {
 
             <p className="mt-3 text-sm leading-7 text-slate-600">
               Bấm vào từng câu để mở tab review. Tab này hiện câu hỏi, hình ảnh liên quan, đáp án học sinh chọn
-              va khung tro chuyen voi AI.
+              và khung trò chuyện với AI.
             </p>
 
             <div className="mt-5 space-y-5">
@@ -811,7 +815,7 @@ export function SchoolExamPage() {
                   </h2>
                 </div>
                 <button
-                  aria-label="Dong tab review"
+                  aria-label="Đóng tab review"
                   className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                   onClick={() => {
                     setSelectedReviewQuestionNumber(null)
@@ -1016,7 +1020,7 @@ export function SchoolExamPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Đề trường co PDF
+              Đề trường có PDF
             </div>
             <h1 className="mt-2 text-3xl font-extrabold text-slate-950">{exam.examTitle}</h1>
             <p className="mt-2 text-sm leading-7 text-slate-600">
@@ -1030,12 +1034,6 @@ export function SchoolExamPage() {
           </div>
         </div>
       </div>
-
-      {submitted && summary ? (
-        <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800">
-          Đã nộp bài. Số câu đúng: {summary.correctCount}/{summary.totalCount} | Điểm tạm tính: {summary.score}/10
-        </div>
-      ) : null}
 
       {loadErrorMessage ? (
         <div className="rounded-[24px] border border-rose-200 bg-rose-50 px-5 py-4 text-sm font-medium text-rose-700">
@@ -1093,13 +1091,12 @@ export function SchoolExamPage() {
             {sectionsByPart.multipleChoice.map((section) => (
               <QuestionSection
                 key={section.sectionId}
-                description={section.instructions}
-                title={section.title}
+                section={section}
               >
                 <div className="grid gap-4">
                   {buildQuestionNumbers(section.startQuestionNumber, section.endQuestionNumber).map((questionNumber) => {
                     const questionKey = String(questionNumber)
-                    const displayQuestionLabel = buildDisplayQuestionLabel(section, questionNumber)
+                    const displayQuestionLabel = buildDisplayQuestionLabel(questionNumber)
                     return (
                       <article
                         key={questionNumber}
@@ -1150,14 +1147,13 @@ export function SchoolExamPage() {
             {sectionsByPart.trueFalse.map((section) => (
               <QuestionSection
                 key={section.sectionId}
-                description={section.instructions}
-                title={section.title}
+                section={section}
               >
                 <div className="grid gap-4">
                   {buildQuestionNumbers(section.startQuestionNumber, section.endQuestionNumber).map((questionNumber) => {
                     const questionKey = String(questionNumber)
                     const labels = buildStatementLabels(section.statementCount)
-                    const displayQuestionLabel = buildDisplayQuestionLabel(section, questionNumber)
+                    const displayQuestionLabel = buildDisplayQuestionLabel(questionNumber)
                     return (
                       <article
                         key={questionNumber}
@@ -1166,9 +1162,9 @@ export function SchoolExamPage() {
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
                         <div className="overflow-hidden rounded-[18px] border border-slate-200 bg-white">
                           <div className="grid grid-cols-[72px_1fr_1fr] border-b border-slate-200 bg-slate-100 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
-                            <div className="px-4 py-3">Y</div>
-                            <div className="border-l border-slate-200 px-4 py-3 text-center">D</div>
-                            <div className="border-l border-slate-200 px-4 py-3 text-center">S</div>
+                            <div className="px-4 py-3">Ý</div>
+                            <div className="border-l border-slate-200 px-4 py-3 text-center">Đúng</div>
+                            <div className="border-l border-slate-200 px-4 py-3 text-center">Sai</div>
                           </div>
                           {labels.map((label) => {
                             const selected = selectedTrueFalse[questionKey]?.[label]
@@ -1231,13 +1227,12 @@ export function SchoolExamPage() {
             {sectionsByPart.shortAnswer.map((section) => (
               <QuestionSection
                 key={section.sectionId}
-                description={section.instructions}
-                title={section.title}
+                section={section}
               >
                 <div className="grid gap-4 sm:grid-cols-2">
                   {buildQuestionNumbers(section.startQuestionNumber, section.endQuestionNumber).map((questionNumber) => {
                     const questionKey = String(questionNumber)
-                    const displayQuestionLabel = buildDisplayQuestionLabel(section, questionNumber)
+                    const displayQuestionLabel = buildDisplayQuestionLabel(questionNumber)
                     return (
                       <article
                         key={questionNumber}
@@ -1253,7 +1248,7 @@ export function SchoolExamPage() {
                               [questionKey]: event.target.value,
                             }))
                           }
-                          placeholder="Nhap đáp án..."
+                          placeholder="Nhập đáp án..."
                           type="text"
                           value={shortAnswers[questionKey] ?? ''}
                         />
@@ -1453,47 +1448,52 @@ function MetricPill({ label, value }: { label: string; value: string }) {
   )
 }
 
-function formatSectionTitle(title: string) {
-  const lower = title.toLowerCase()
-  if (lower.includes('phan i') || lower.includes('nhieu lua chon')) {
-    return 'Phần I. Trắc nghiệm nhiều lựa chọn'
-  }
-  if (lower.includes('phan ii') || lower.includes('dung sai')) {
-    return 'Phần II. Trắc nghiệm đúng sai'
-  }
-  if (lower.includes('phan iii') || lower.includes('tra loi ngan')) {
-    return 'Phần III. Trả lời ngắn'
-  }
-  return title
+type SchoolExamSection = SchoolExamPaperRecord['sections'][number]
+
+const SECTION_TITLES: Record<SchoolExamSection['partCode'], string> = {
+  multiple_choice: 'Phần I. Trắc nghiệm nhiều lựa chọn',
+  true_false: 'Phần II. Trắc nghiệm đúng sai',
+  short_answer: 'Phần III. Trả lời ngắn',
 }
 
-function formatSectionDescription(description: string) {
-  if (description.toLowerCase().includes('moi cau chon 1 trong 4')) {
-    return 'Mỗi câu chọn 1 trong 4 đáp án.'
+function hasVietnameseDiacritics(text: string) {
+  return /[^ -~\s]/.test(text)
+}
+
+function formatSectionTitle(section: SchoolExamSection) {
+  return SECTION_TITLES[section.partCode] ?? section.title
+}
+
+function formatSectionDescription(section: SchoolExamSection) {
+  if (hasVietnameseDiacritics(section.instructions)) {
+    return section.instructions
   }
-  if (description.toLowerCase().includes('moi y (a), (b), (c), (d)')) {
-    return 'Trong mỗi câu, thí sinh chọn đúng hoặc sai.'
+
+  const range = `Câu ${section.startQuestionNumber} đến ${section.endQuestionNumber}`
+  switch (section.partCode) {
+    case 'multiple_choice':
+      return `${range}, mỗi câu chọn 1 trong ${section.optionsPerQuestion || 4} đáp án.`
+    case 'true_false':
+      return `${range}, mỗi câu có ${section.statementCount || 4} ý, chọn Đúng hoặc Sai cho từng ý.`
+    case 'short_answer':
+      return `${range}, điền đáp án vào ô trống.`
+    default:
+      return section.instructions
   }
-  if (description.toLowerCase().includes('thi sinh dien dap an')) {
-    return 'Thí sinh điền đáp án.'
-  }
-  return description
 }
 
 function QuestionSection({
-  title,
-  description,
+  section,
   children,
 }: {
-  title: string
-  description: string
+  section: SchoolExamSection
   children: ReactNode
 }) {
   return (
     <section>
       <div className="mb-4">
-        <h3 className="text-lg font-bold text-slate-950">{formatSectionTitle(title)}</h3>
-        <p className="mt-1 text-sm leading-6 text-slate-600">{formatSectionDescription(description)}</p>
+        <h3 className="text-lg font-bold text-slate-950">{formatSectionTitle(section)}</h3>
+        <p className="mt-1 text-sm leading-6 text-slate-600">{formatSectionDescription(section)}</p>
       </div>
       {children}
     </section>
@@ -1612,12 +1612,8 @@ function formatPartLabel(partCode: ReviewItem['partCode']) {
   }
 }
 
-function buildDisplayQuestionLabel(
-  section: SchoolExamPaperRecord['sections'][number],
-  questionNumber: number,
-) {
-  const localQuestionNumber = questionNumber - section.startQuestionNumber + 1
-  return `Câu ${localQuestionNumber}`
+function buildDisplayQuestionLabel(questionNumber: number) {
+  return `Câu ${questionNumber}`
 }
 
 function buildQuestionContent(record: SchoolExamQuestionRecord | undefined, displayQuestionLabel: string) {
