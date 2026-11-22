@@ -16,6 +16,14 @@ export type ExamDraftSession = {
   deliveryMode?: 'cloud' | 'local_mock'
   sourceExamId?: string
   blueprintId?: string
+  seed?: number
+  selectionMode?: 'balanced' | 'random'
+  warnings?: string[]
+  metadata?: {
+    seed: number
+    selectionMode: 'balanced' | 'random'
+    seenQuestionIds: string[]
+  }
   createdAt: number
 }
 

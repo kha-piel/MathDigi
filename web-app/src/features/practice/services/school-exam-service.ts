@@ -1,4 +1,6 @@
 ﻿import { getSupabaseBrowserClient } from '../../../lib/supabase/client'
+import { fetchQuestionPages } from './practice-pool-loader'
+import { contentFingerprint, deduplicateQuestions } from './practice-exam-builder'
 import { hasSupabaseEnv } from '../../../lib/config/env'
 import type { PracticeExamCatalogItem } from '../types/practice-types'
 import {
@@ -112,7 +114,6 @@ type SchoolExamQuestionBankRow = SchoolExamQuestionRow & {
 const schoolExamCatalogCache = new Map<string, Promise<PracticeExamCatalogItem[]>>()
 const schoolExamDetailCache = new Map<string, Promise<SchoolExamPaperRecord | null>>()
 const schoolExamQuestionCache = new Map<string, Promise<SchoolExamQuestionRecord[]>>()
-const schoolExamQuestionBankCache = new Map<string, Promise<SchoolExamQuestionRecord[]>>()
 const schoolExamQuestionSummaryCache = new Map<string, Promise<SchoolExamQuestionSummary[]>>()
 
 type SchoolExamQuestionSummary = {
@@ -120,18 +121,6 @@ type SchoolExamQuestionSummary = {
   difficultyLevel: 1 | 2 | 3 | 4
   topic: string
   schoolName: string
-}
-
-type SchoolExamQuestionSummaryRow = {
-  question_type: SchoolExamSectionPart
-  difficulty_level?: number | null
-  topic: string | null
-  metadata: SchoolExamQuestionMetadataRow | null
-  exam: {
-    school_name: string
-    subject_code: string
-    is_active: boolean
-  } | null
 }
 
 export async function fetchSchoolExamCatalog(): Promise<PracticeExamCatalogItem[]> {
@@ -337,15 +326,7 @@ async function fetchSchoolExamQuestionsUncached(examId: string): Promise<SchoolE
 }
 
 export async function fetchSchoolExamQuestionBank(subjectId: string): Promise<SchoolExamQuestionRecord[]> {
-  const cacheKey = subjectId.trim().toUpperCase()
-  const cached = schoolExamQuestionBankCache.get(cacheKey)
-  if (cached) {
-    return cached
-  }
-
-  const nextPromise = fetchSchoolExamQuestionBankUncached(cacheKey)
-  schoolExamQuestionBankCache.set(cacheKey, nextPromise)
-  return withCacheInvalidation(schoolExamQuestionBankCache, cacheKey, nextPromise)
+  return fetchSchoolExamQuestionBankUncached(subjectId.trim().toUpperCase())
 }
 
 export async function fetchSchoolExamQuestionSummary(subjectId: string): Promise<SchoolExamQuestionSummary[]> {
@@ -361,51 +342,12 @@ export async function fetchSchoolExamQuestionSummary(subjectId: string): Promise
 }
 
 async function fetchSchoolExamQuestionSummaryUncached(subjectId: string): Promise<SchoolExamQuestionSummary[]> {
-  if (!hasSupabaseEnv()) {
-    return (await getSupplementalQuestionBank(subjectId)).map((question) => ({
-      questionType: question.questionType,
-      difficultyLevel: question.difficultyLevel,
-      topic: question.topic ?? '',
-      schoolName: question.schoolName ?? '',
-    }))
-  }
-
-  const supabase = getSupabaseBrowserClient()
-  const { data, error } = await supabase
-    .from('questions')
-    .select(
-      'question_type, difficulty_level, topic, metadata, exam:exams!inner(school_name, subject_code, is_active)',
-    )
-    .eq('exam.subject_code', subjectId)
-    .eq('exam.is_active', true)
-    .returns<SchoolExamQuestionSummaryRow[]>()
-
-  if (error) {
-    if (shouldFallbackToLocalMock(error.message)) {
-      return (await getSupplementalQuestionBank(subjectId)).map((question) => ({
-        questionType: question.questionType,
-        difficultyLevel: question.difficultyLevel,
-        topic: question.topic ?? '',
-        schoolName: question.schoolName ?? '',
-      }))
-    }
-
-    throw new Error(`Không thể tải tổng quan kho câu hỏi đề trường: ${error.message}`)
-  }
-
-  return data
-    .filter((item) => item.exam?.is_active)
-    .map((item) => ({
-      questionType: item.question_type,
-      difficultyLevel: normalizeDifficultyLevel(
-        item.difficulty_level ?? null,
-        item.metadata,
-        item.question_type,
-        Number(item.metadata?.source_question_number ?? 0),
-      ),
-      topic: item.topic ?? '',
-      schoolName: item.exam?.school_name ?? '',
-    }))
+  return (await fetchSchoolExamQuestionBank(subjectId)).map((question) => ({
+    questionType: question.questionType,
+    difficultyLevel: question.difficultyLevel,
+    topic: question.topic,
+    schoolName: question.schoolName ?? '',
+  }))
 }
 
 async function fetchSchoolExamQuestionBankUncached(subjectId: string): Promise<SchoolExamQuestionRecord[]> {
@@ -415,22 +357,25 @@ async function fetchSchoolExamQuestionBankUncached(subjectId: string): Promise<S
 
   const supabase = getSupabaseBrowserClient()
 
-  const { data, error } = await supabase
-    .from('questions')
-    .select(
-      'question_id, exam_id, question_number, question_type, question_text, correct_answer, statement_json, topic, obsidian_source_path, has_image, metadata, options:question_options(option_label, option_text, display_order), assets:question_assets(asset_type, asset_path, display_order), exam:exams!inner(exam_id, title, school_name, year, pdf_url, tags, is_active, subject_code)',
+  let data: SchoolExamQuestionBankRow[]
+  try {
+    data = await fetchQuestionPages<SchoolExamQuestionBankRow>((start, end) => supabase
+      .from('questions')
+      .select(
+        'question_id, exam_id, question_number, difficulty_level, question_type, question_text, correct_answer, statement_json, topic, obsidian_source_path, has_image, metadata, options:question_options(option_label, option_text, display_order), assets:question_assets(asset_type, asset_path, display_order), exam:exams!inner(exam_id, title, school_name, year, pdf_url, tags, is_active, subject_code)',
+      )
+      .eq('exam.subject_code', subjectId)
+      .eq('exam.is_active', true)
+      .order('question_id', { ascending: true })
+      .range(start, end)
+      .returns<SchoolExamQuestionBankRow[]>(),
     )
-    .eq('exam.subject_code', subjectId)
-    .eq('exam.is_active', true)
-    .order('question_number', { ascending: true })
-    .returns<SchoolExamQuestionBankRow[]>()
-
-  if (error) {
-    if (shouldFallbackToLocalMock(error.message)) {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (shouldFallbackToLocalMock(message) || /fetch|network/i.test(message)) {
       return getSupplementalQuestionBank(subjectId)
     }
-
-    throw new Error(`Không thể tải kho câu hỏi đề trường: ${error.message}`)
+    throw new Error(`Không thể tải kho câu hỏi đề trường: ${message}`, { cause: error })
   }
 
   const remoteQuestions = data
@@ -469,7 +414,53 @@ async function fetchSchoolExamQuestionBankUncached(subjectId: string): Promise<S
       tags: item.exam?.tags ?? [],
     }))
 
-  return [...remoteQuestions, ...await getSupplementalQuestionBank(subjectId)]
+  const bankQuestions = subjectId === 'TOAN' ? await fetchApprovedQuestionBank() : []
+  return deduplicateQuestions([...remoteQuestions, ...bankQuestions], (question) =>
+    contentFingerprint(question.questionType, question.questionText,
+      question.questionType === 'true_false'
+        ? question.statements.map((statement) => statement.text)
+        : question.options.map((option) => option.optionText)),
+  )
+}
+
+type ApprovedBankRow = Omit<SchoolExamQuestionRow, 'exam_id' | 'question_number' | 'metadata'> & {
+  solution: string | null
+  assets: SchoolExamQuestionAssetRow[] | null
+}
+
+async function fetchApprovedQuestionBank(): Promise<SchoolExamQuestionRecord[]> {
+  const supabase = getSupabaseBrowserClient()
+  const data = await fetchQuestionPages<ApprovedBankRow>((start, end) => supabase
+    .from('question_bank')
+    .select('question_id, difficulty_level, question_type, question_text, correct_answer, statement_json, topic, obsidian_source_path, has_image, solution, options:question_bank_options(option_label, option_text, display_order), assets:question_bank_assets(asset_type, asset_path, display_order)')
+    .eq('subject_code', 'TOAN')
+    .eq('review_status', 'approved')
+    .order('question_id', { ascending: true })
+    .range(start, end)
+    .returns<ApprovedBankRow[]>(),
+    true,
+  )
+  return data.map((item) => ({
+    questionId: item.question_id,
+    examId: 'question-bank',
+    questionNumber: 0,
+    difficultyLevel: normalizeDifficultyLevel(item.difficulty_level ?? null, null, item.question_type, 0),
+    questionType: item.question_type,
+    questionText: item.question_text,
+    statements: item.statement_json ?? [],
+    options: [...(item.options ?? [])].sort((a, b) => a.display_order - b.display_order).map((option) => ({
+      optionLabel: option.option_label,
+      optionText: option.option_text,
+      displayOrder: option.display_order,
+    })),
+    assets: mapQuestionAssets(item.assets),
+    assetPaths: mapAssetPaths(item.assets),
+    topic: item.topic ?? '',
+    obsidianSourcePath: item.obsidian_source_path ?? '',
+    hasImage: item.has_image,
+    answerValue: item.correct_answer ?? '',
+    solution: item.solution,
+  }))
 }
 
 export function normalizeAnswer(input: string) {

@@ -44,6 +44,7 @@ export function ExamPage() {
 
   const [remainingSeconds, setRemainingSeconds] = useState<number>(0)
   const [flashMessage, setFlashMessage] = useState<string>('')
+  const [dismissedWarningsSessionId, setDismissedWarningsSessionId] = useState<string | null>(null)
   const [chatInput, setChatInput] = useState('')
   const [chatStatus, setChatStatus] = useState('')
   const [isAiBusy, setIsAiBusy] = useState(false)
@@ -368,6 +369,15 @@ export function ExamPage() {
         <SummaryPill label="Sync" value={syncStatus} />
       </div>
 
+      {session.deliveryMode === 'local_mock' && session.warnings?.length && dismissedWarningsSessionId !== sessionId ? (
+        <div role="status" className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
+          <div className="flex items-center justify-between gap-4">
+            <strong>Điều chỉnh đề thi theo kho câu hỏi hiện có</strong>
+            <button type="button" onClick={() => setDismissedWarningsSessionId(sessionId)} className="rounded-lg px-3 py-2 font-semibold">Đóng thông báo</button>
+          </div>
+          <ul className="mt-2 list-disc pl-5">{session.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+        </div>
+      ) : null}
       {flashMessage ? <div className="mb-5 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3.5 font-semibold text-orange-900 shadow-sm">{flashMessage}</div> : null}
       {isSubmitted ? (
         <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3.5 font-semibold text-emerald-800 shadow-sm">Bài làm đã được nộp. Bạn có thể xem tổng kết và review chi tiết.</div>
@@ -688,5 +698,4 @@ function formatQuestionType(question: DraftQuestion) {
 
   return 'Trả lời ngắn'
 }
-
 

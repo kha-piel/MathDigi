@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useAuthSessionStore } from '../../features/auth/store/auth-session-store'
+import type { PracticeSelectionMode } from '../../features/practice/services/practice-exam-builder'
 import { useExamDraftStore } from '../../features/exam/store/exam-draft-store'
 import {
   createPracticeExamSession,
@@ -19,6 +21,8 @@ const DEFAULT_SUBJECT_ID = SUBJECT_OPTIONS[0].subjectId
 
 export function PracticeHubPage() {
   const navigate = useNavigate()
+  const userId = useAuthSessionStore((state) => state.user?.id)
+  const [selectionMode, setSelectionMode] = useState<PracticeSelectionMode>('balanced')
   const createSession = useExamDraftStore((state) => state.createSession)
 
   const [keyword, setKeyword] = useState('')
@@ -125,6 +129,8 @@ export function PracticeHubPage() {
         subjectId: selectedSubject.subjectId,
         subjectName: selectedSubject.subjectName,
         preferredSchoolName: selectedSchoolName || undefined,
+        mode: selectionMode,
+        userId,
       })
 
       createSession(session)
@@ -312,6 +318,18 @@ export function PracticeHubPage() {
                     {blueprint.name}
                   </option>
                 ))}
+              </select>
+            </label>
+
+            <label className="grid gap-2 text-sm">
+              <span className="font-medium text-slate-700">Cách trộn đề</span>
+              <select
+                className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900"
+                value={selectionMode}
+                onChange={(event) => setSelectionMode(event.target.value as PracticeSelectionMode)}
+              >
+                <option value="balanced">Cân bằng theo mức độ</option>
+                <option value="random">Ngẫu nhiên hoàn toàn (không theo mức độ)</option>
               </select>
             </label>
 
