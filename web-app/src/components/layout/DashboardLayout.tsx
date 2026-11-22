@@ -23,25 +23,25 @@ type NavigationItem = {
 
 const baseNavigationItems: NavigationItem[] = [
   {
-    label: 'Làm đề thi thử',
+    label: 'Lam de thi thu',
     to: '/practice',
     icon: FileText,
     match: ['/practice'],
   },
   {
-    label: 'Ôn tập kiến thức',
+    label: 'On tap kien thuc',
     to: '/dashboard',
     icon: BookOpen,
     match: ['/dashboard', '/exam', '/review'],
   },
   {
-    label: 'Lịch sử làm bài',
+    label: 'Lich su lam bai',
     to: '/history',
     icon: Clock3,
     match: ['/history'],
   },
   {
-    label: 'Hồ sơ học sinh',
+    label: 'Ho so hoc sinh',
     to: '/profile',
     icon: User,
     match: ['/profile', '/home'],
@@ -62,7 +62,7 @@ export function DashboardLayout() {
       await logout()
       navigate('/login', { replace: true })
     } catch (error) {
-      setLogoutError(error instanceof Error ? error.message : 'Đăng xuất thất bại.')
+      setLogoutError(error instanceof Error ? error.message : 'Dang xuat that bai.')
     }
   }
 
@@ -79,7 +79,7 @@ export function DashboardLayout() {
               navigationItems={navigationItems}
               onNavigate={() => setIsMobileMenuOpen(false)}
               onLogout={handleLogout}
-              userLabel={user?.fullName || user?.username || user?.email || 'Học sinh'}
+              userLabel={user?.fullName || user?.username || user?.email || 'Hoc sinh'}
             />
           </aside>
         )}
@@ -95,7 +95,7 @@ export function DashboardLayout() {
             </NavLink>
 
             <button
-              aria-label={isMobileMenuOpen ? 'Đóng menu' : 'Mở menu'}
+              aria-label={isMobileMenuOpen ? 'Dong menu' : 'Mo menu'}
               className="rounded-2xl border border-slate-200 bg-slate-50 p-2 text-slate-700 transition active:scale-[0.98]"
               onClick={() => setIsMobileMenuOpen((value) => !value)}
               type="button"
@@ -232,7 +232,7 @@ function getNavigationItems(userRole?: string) {
 
   if (normalizedRole === 'admin' || normalizedRole === 'teacher') {
     items.push({
-      label: 'Nhập đề thi',
+      label: 'Nhap de thi',
       to: '/admin/import-exam',
       icon: Shield,
       match: ['/admin'],
