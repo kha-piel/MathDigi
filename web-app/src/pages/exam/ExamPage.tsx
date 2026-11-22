@@ -330,7 +330,7 @@ export function ExamPage() {
   }
 
   async function handleSendChat() {
-    if (isSubmitted) {
+    if (isSubmitted || tutorExamRunning) {
       return
     }
 
@@ -466,6 +466,7 @@ export function ExamPage() {
         </section>
 
         <section className="flex min-h-[320px] flex-col rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm md:p-6 lg:p-8">
+          {!tutorExamRunning && <>
           <h3 className="m-0 mb-2 text-xl font-bold text-slate-900">AI Chat</h3>
           <p className="m-0 text-sm text-slate-500">Lịch sử chat được giữ xuyên suốt trong exam session hiện tại.</p>
           <div className="my-4 grid max-h-[320px] gap-3 overflow-y-auto pr-1">
@@ -517,6 +518,7 @@ export function ExamPage() {
             </button>
           </div>
           {chatStatus ? <p className="mb-4 text-sm text-slate-500">{chatStatus}</p> : null}
+          </>}
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-4">
             <strong className="text-sm text-slate-900">Trạng thái câu hiện tại</strong>
             <p className="mt-2 text-sm text-slate-600">
