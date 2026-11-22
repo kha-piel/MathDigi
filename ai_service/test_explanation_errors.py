@@ -9,6 +9,14 @@ with patch("dotenv.load_dotenv"), patch.dict("os.environ", {"GEMINI_API_KEY": "f
 
 
 class ExplanationTests(unittest.TestCase):
+    def setUp(self):
+        main.app.dependency_overrides[main.current_user] = lambda: {"id": "student-1", "token": "t"}
+        self.addCleanup(main.app.dependency_overrides.clear)
+
+    def test_requires_login(self):
+        main.app.dependency_overrides.clear()
+        self.assertEqual(self.request()[0], 401)
+
     def request(self):
         body = json.dumps({
             "question_content": "1 + 1?",
