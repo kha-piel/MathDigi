@@ -223,6 +223,7 @@ async function fetchSchoolExamByIdUncached(examId: string): Promise<SchoolExamPa
     )
     .eq('exam_id', examId)
     .eq('is_active', true)
+    .not('exam_id', 'like', `${SUPPLEMENTAL_EXAM_ID_PREFIX}%`)
     .maybeSingle<SchoolExamDetailRow>()
 
   if (error) {
