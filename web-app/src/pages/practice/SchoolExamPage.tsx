@@ -39,6 +39,7 @@ type ReviewItem = {
   displayQuestionLabel: string
   selectedAnswer: string
   correctAnswer: string
+  answered: boolean
   correct: boolean
   questionContent: string
   questionStem: string
@@ -344,6 +345,7 @@ export function SchoolExamPage() {
             displayQuestionLabel,
             selectedAnswer,
             correctAnswer,
+            answered: Boolean(selectedChoices[questionKey]),
             correct: selectedChoices[questionKey] === (answerKeyByQuestionNumber[questionNumber] ?? ''),
             questionContent,
             questionStem,
@@ -386,6 +388,7 @@ export function SchoolExamPage() {
             displayQuestionLabel,
             selectedAnswer,
             correctAnswer,
+            answered: labels.every((label) => label in selectedMap),
             correct,
             questionContent,
             questionStem,
@@ -407,6 +410,7 @@ export function SchoolExamPage() {
           displayQuestionLabel,
           selectedAnswer,
           correctAnswer,
+          answered: Boolean(shortAnswers[questionKey]?.trim()),
           correct: acceptedResponses.some((candidate) => normalizeAnswer(candidate) === normalizeAnswer(selectedAnswer)),
           questionContent,
           questionStem,
@@ -423,9 +427,13 @@ export function SchoolExamPage() {
     return items
   }, [aiExplanationByQuestion, answerKeyByQuestionNumber, exam, questionRecordByNumber, selectedChoices, selectedTrueFalse, shortAnswers])
 
-  const wrongReviewItems = useMemo(
+  const missedReviewItems = useMemo(
     () => reviewItems.filter((item) => !item.correct),
     [reviewItems],
+  )
+  const wrongReviewItems = useMemo(
+    () => missedReviewItems.filter((item) => item.answered),
+    [missedReviewItems],
   )
 
   const reviewItemsByPart = useMemo(
@@ -625,7 +633,7 @@ export function SchoolExamPage() {
 
 
   async function handleAnalyzeWeaknesses() {
-    if (wrongReviewItems.length === 0) {
+    if (missedReviewItems.length === 0) {
       setWeaknessAnalysis('Bạn không có câu sai nào trong bài này.')
       setRecommendedTopics([])
       setWeaknessAnalysisError('')
@@ -637,7 +645,7 @@ export function SchoolExamPage() {
 
     try {
       const result = await requestWeaknessAnalysis(
-        wrongReviewItems.map((item) => ({
+        missedReviewItems.map((item) => ({
           questionId: String(item.questionNumber),
           questionContent: item.questionContent || item.displayQuestionLabel,
           topic: item.topic || exam?.subjectName || 'Chưa xác định chuyên đá»',
@@ -648,7 +656,7 @@ export function SchoolExamPage() {
       setWeaknessAnalysis(result)
       setRecommendedTopics(
         inferKnowledgeReviewTopics(
-          wrongReviewItems.flatMap((item) => [
+          missedReviewItems.flatMap((item) => [
             item.topic,
             item.obsidianSourcePath,
             item.questionContent,
