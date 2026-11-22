@@ -20,6 +20,7 @@ import {
   type SchoolExamAttemptHistoryItem,
 } from '../../features/practice/services/school-exam-attempt-service'
 import { useFlaggedWrongQuestionStore } from '../../features/practice/store/flagged-wrong-question-store'
+import { settleHistorySource } from '../../features/history/services/history-source'
 import { hasSupabaseEnv } from '../../lib/config/env'
 
 type HistoryTab = 'school_exams' | 'practice' | 'ai'
@@ -113,47 +114,51 @@ export function HistoryPage() {
   )
 
   useEffect(() => {
-    if (!authUser?.id) {
-      setIsLoading(false)
-      return
-    }
-
-    if (!hasSupabaseEnv()) {
-      setErrorMessage('Chua co cau hinh Supabase cho web-app.')
-      setIsLoading(false)
-      return
-    }
-
     let isMounted = true
-    setIsLoading(true)
-    setErrorMessage('')
+    void Promise.resolve().then(() => {
+      if (!isMounted) return
+      if (!authUser?.id) {
+        setIsLoading(false)
+        return
+      }
 
-    void Promise.all([
-      fetchSchoolExamAttemptHistory(authUser.id),
-      fetchAttemptHistory(authUser.id),
-      fetchCloudInProgressAttempts(authUser.id),
-      fetchUnifiedAiHistory(authUser.id),
-    ])
-      .then(([schoolRows, practiceRows, cloudRows, aiRows]) => {
-        if (!isMounted) {
-          return
-        }
+      if (!hasSupabaseEnv()) {
+        setErrorMessage('Chua co cau hinh Supabase cho web-app.')
+        setIsLoading(false)
+        return
+      }
 
-        setSchoolExamHistory(schoolRows)
-        setPracticeHistory(practiceRows)
-        setCloudInProgressAttempts(cloudRows)
-        setAiHistory(aiRows)
-      })
-      .catch((error: unknown) => {
-        if (isMounted) {
-          setErrorMessage(error instanceof Error ? error.message : 'Khong the tai lich su hoc tap.')
-        }
-      })
-      .finally(() => {
-        if (isMounted) {
-          setIsLoading(false)
-        }
-      })
+      setIsLoading(true)
+      setErrorMessage('')
+
+      return Promise.all([
+        settleHistorySource(fetchSchoolExamAttemptHistory(authUser.id), [], 'Đề trường'),
+        settleHistorySource(fetchAttemptHistory(authUser.id), [], 'Luyện tập'),
+        settleHistorySource(fetchCloudInProgressAttempts(authUser.id), [], 'Bài đang làm'),
+        settleHistorySource(fetchUnifiedAiHistory(authUser.id), [], 'Lịch sử AI'),
+      ])
+        .then(([schoolRows, practiceRows, cloudRows, aiRows]) => {
+          if (!isMounted) {
+            return
+          }
+
+          setSchoolExamHistory(schoolRows.data)
+          setPracticeHistory(practiceRows.data)
+          setCloudInProgressAttempts(cloudRows.data)
+          setAiHistory(aiRows.data)
+          setErrorMessage([schoolRows, practiceRows, cloudRows, aiRows].flatMap((row) => row.error ? [row.error] : []).join(' · '))
+        })
+        .catch((error: unknown) => {
+          if (isMounted) {
+            setErrorMessage(error instanceof Error ? error.message : 'Khong the tai lich su hoc tap.')
+          }
+        })
+        .finally(() => {
+          if (isMounted) {
+            setIsLoading(false)
+          }
+        })
+    })
 
     return () => {
       isMounted = false

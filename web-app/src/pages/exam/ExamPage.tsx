@@ -39,10 +39,8 @@ export function ExamPage() {
   const cacheAiExplanation = useExamRuntimeStore((state) => state.cacheAiExplanation)
   const markCloudSync = useExamRuntimeStore((state) => state.markCloudSync)
   const submitSession = useExamRuntimeStore((state) => state.submitSession)
-  const clearRuntimeSession = useExamRuntimeStore((state) => state.clearRuntimeSession)
-  const clearDraftSession = useExamDraftStore((state) => state.clearSession)
 
-  const [remainingSeconds, setRemainingSeconds] = useState<number>(0)
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null)
   const [flashMessage, setFlashMessage] = useState<string>('')
   const [dismissedWarningsSessionId, setDismissedWarningsSessionId] = useState<string | null>(null)
   const [chatInput, setChatInput] = useState('')
@@ -93,12 +91,10 @@ export function ExamPage() {
     const updateRemaining = () => {
       const nextRemaining = getRemainingSeconds(session, runtime)
       setRemainingSeconds(nextRemaining)
-      if (nextRemaining <= 0) {
-        setFlashMessage('Đã hết giờ. Hãy nộp bài để xem tổng kết.')
-      }
     }
 
     updateRemaining()
+    if (getRemainingSeconds(session, runtime) === null) return
     const timerId = window.setInterval(updateRemaining, 1000)
     return () => window.clearInterval(timerId)
   }, [runtime, session])
@@ -278,33 +274,16 @@ export function ExamPage() {
       return
     }
 
-    if (session.deliveryMode === 'local_mock') {
-      navigate(`/review/${session.sessionId}`)
-      return
+    if (authUser?.id) {
+      void persistCompletedAttempt({ userId: authUser.id, session, runtime: latestRuntime })
+        .then((attemptId) => {
+          markCloudSync(session.sessionId, {
+            persistedExamId: null, persistedAttemptId: attemptId, lastSyncedAt: Date.now(),
+          })
+        })
+        .catch((error: unknown) => console.warn('Không thể lưu bài luyện tập lên máy chủ; kết quả vẫn được giữ trên thiết bị.', error))
     }
-
-    if (!authUser?.id) {
-      setFlashMessage('Không tìm thấy user đăng nhập để lưu kết quả bài làm.')
-      return
-    }
-
-    setFlashMessage('Đang lưu kết quả bài làm lên Supabase...')
-
-    try {
-      const attemptId = await persistCompletedAttempt({
-        userId: authUser.id,
-        session,
-        runtime: latestRuntime,
-      })
-
-      clearRuntimeSession(session.sessionId)
-      clearDraftSession(session.sessionId)
-      navigate(`/review/${attemptId}`)
-    } catch (error) {
-      setFlashMessage(
-        error instanceof Error ? error.message : 'Không thể lưu kết quả bài làm lên Supabase.',
-      )
-    }
+    navigate(`/review/${session.sessionId}`)
   }
 
   async function handleSendChat() {
@@ -365,7 +344,7 @@ export function ExamPage() {
         <SummaryPill label="Tiến độ" value={`Câu ${runtime.currentIndex + 1}/${session.questions.length}`} />
         <SummaryPill label="Đã trả lời" value={`${answeredCount}/${session.questions.length}`} />
         <SummaryPill label="Độ khó" value={session.difficultyLabel} />
-        <SummaryPill label="Còn lại" value={formatDuration(remainingSeconds)} />
+        <SummaryPill label="Thời gian" value={remainingSeconds === null ? 'Không giới hạn thời gian' : formatDuration(remainingSeconds)} />
         <SummaryPill label="Sync" value={syncStatus} />
       </div>
 
@@ -376,6 +355,11 @@ export function ExamPage() {
             <button type="button" onClick={() => setDismissedWarningsSessionId(sessionId)} className="rounded-lg px-3 py-2 font-semibold">Đóng thông báo</button>
           </div>
           <ul className="mt-2 list-disc pl-5">{session.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+        </div>
+      ) : null}
+      {remainingSeconds !== null && remainingSeconds <= 0 && getRemainingSeconds(session, runtime) !== null ? (
+        <div role="status" className="mb-5 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3.5 font-semibold text-orange-900">
+          Đã hết giờ. Hãy nộp bài để xem tổng kết.
         </div>
       ) : null}
       {flashMessage ? <div className="mb-5 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3.5 font-semibold text-orange-900 shadow-sm">{flashMessage}</div> : null}
@@ -439,7 +423,7 @@ export function ExamPage() {
               Câu tiếp theo
             </button>
             <button
-              disabled={remainingSeconds <= 0 || questionLocked || isSubmitted}
+              disabled={(remainingSeconds !== null && remainingSeconds <= 0) || questionLocked || isSubmitted}
               onClick={handleCheckAnswer}
               className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-700 shadow-sm disabled:opacity-50 disabled:hover:bg-blue-600"
               type="button"
@@ -698,4 +682,3 @@ function formatQuestionType(question: DraftQuestion) {
 
   return 'Trả lời ngắn'
 }
-

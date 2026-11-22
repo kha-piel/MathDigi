@@ -1,4 +1,5 @@
 ﻿import { getSupabaseBrowserClient } from '../../../lib/supabase/client'
+import { isMissingHistoryTable, practiceKindFilter } from '../../exam/core/practice-attempt'
 import {
   fetchSchoolExamCatalog,
   fetchSchoolExamQuestionBank,
@@ -54,8 +55,9 @@ type AttemptHistoryRow = {
   wrong_count: number
   skipped_count: number
   completed_at: string | null
-  status: string
   metadata: {
+    status?: string
+    title?: string
     subject_name?: string
     topic_name?: string
     difficulty_label?: string
@@ -264,18 +266,20 @@ export async function fetchAttemptHistory(userId: string): Promise<AttemptHistor
   const supabase = getSupabaseBrowserClient()
   const { data, error } = await supabase
     .from('student_attempts')
-    .select('attempt_id, score, correct_count, wrong_count, skipped_count, completed_at, status, metadata, exams(title)')
+    .select('attempt_id, score, correct_count, wrong_count, skipped_count, completed_at, metadata, exams(title)')
     .eq('user_id', userId)
+    .eq(...practiceKindFilter())
     .order('completed_at', { ascending: false, nullsFirst: false })
     .returns<AttemptHistoryRow[]>()
 
   if (error) {
+    if (isMissingHistoryTable(error)) return []
     throw new Error(`Không thể tải lịch sử làm bài: ${error.message}`)
   }
 
   return data.map((attempt) => ({
     attemptId: attempt.attempt_id,
-    examTitle: unwrapSingle(attempt.exams)?.title ?? 'Custom Exam',
+    examTitle: attempt.metadata?.title ?? unwrapSingle(attempt.exams)?.title ?? 'Bài luyện tập',
     subjectName: attempt.metadata?.subject_name ?? '--',
     topicName: attempt.metadata?.topic_name ?? '--',
     difficultyLabel: attempt.metadata?.difficulty_label ?? '--',
@@ -284,7 +288,7 @@ export async function fetchAttemptHistory(userId: string): Promise<AttemptHistor
     wrongCount: attempt.wrong_count,
     skippedCount: attempt.skipped_count,
     completedAt: attempt.completed_at,
-    status: attempt.status,
+    status: attempt.metadata?.status ?? 'completed',
   }))
 }
 
@@ -309,6 +313,7 @@ async function fetchLegacySubjects(): Promise<SubjectOption[]> {
 }
 
 async function fetchLegacyTopicsBySubjectId(subjectId: string): Promise<TopicOption[]> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(subjectId)) return []
   const supabase = getSupabaseBrowserClient()
   const { data, error } = await supabase
     .from('topics')
@@ -567,4 +572,3 @@ function shuffle<T>(items: T[]) {
 
   return shuffled
 }
-

@@ -1,3 +1,4 @@
+import { isMissingHistoryTable, schoolAttemptMetadata, schoolExamFilter, schoolKindFilter } from '../../exam/core/practice-attempt'
 import { getSupabaseBrowserClient } from '../../../lib/supabase/client'
 import {
   formatSchoolExamDisplaySchoolName,
@@ -184,7 +185,7 @@ export async function persistCompletedSchoolExamAttempt(input: PersistSchoolExam
       total_count: input.totalCount,
       started_at: new Date(input.startedAt).toISOString(),
       completed_at: completedAtIso,
-      metadata: input.metadata,
+      metadata: schoolAttemptMetadata(input.metadata),
     })
     .select('attempt_id')
     .single<CreatedAttemptRow>()
@@ -254,10 +255,13 @@ export async function fetchSchoolExamAttemptHistory(
     .from('student_attempts')
     .select('attempt_id, exam_id, variant_code, score, correct_count, wrong_count, skipped_count, total_count, completed_at, exams(title, school_name, subject_name, year)')
     .eq('user_id', userId)
+    .not(...schoolExamFilter())
+    .or(schoolKindFilter())
     .order('completed_at', { ascending: false })
     .returns<SchoolExamAttemptRow[]>()
 
   if (error) {
+    if (isMissingHistoryTable(error)) return []
     throw new Error(formatStudentLearningHistoryError(error.message, 'tai lich su de thi truong'))
   }
 
@@ -272,6 +276,8 @@ export async function fetchSchoolExamAttemptDetail(
     .from('student_attempts')
     .select('attempt_id, exam_id, variant_code, score, correct_count, wrong_count, skipped_count, total_count, completed_at, exams(title, school_name, subject_name, year), student_answers(question_number, question_type, selected_answer, correct_answer, is_correct, question_content, topic), student_ai_messages(message_id, question_number, role, content, created_at)')
     .eq('attempt_id', attemptId)
+    .not(...schoolExamFilter())
+    .or(schoolKindFilter())
     .maybeSingle<SchoolExamAttemptDetailRow>()
 
   if (error) {
@@ -319,10 +325,13 @@ export async function fetchSchoolExamAiHistory(
     .from('student_ai_messages')
     .select('message_id, attempt_id, question_number, role, content, created_at, student_attempts!inner(user_id, exams(title, school_name))')
     .eq('student_attempts.user_id', userId)
+    .not(...schoolExamFilter('student_attempts.'))
+    .or(schoolKindFilter(), { referencedTable: 'student_attempts' })
     .order('created_at', { ascending: false })
     .returns<SchoolExamAiMessageRow[]>()
 
   if (error) {
+    if (isMissingHistoryTable(error)) return []
     throw new Error(formatStudentLearningHistoryError(error.message, 'tai lich su AI de truong'))
   }
 
