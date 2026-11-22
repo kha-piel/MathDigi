@@ -1,5 +1,5 @@
 import { buildQuestionAssetUrls as buildSchoolExamAssetUrls } from '../../practice/utils/question-assets'
-﻿import { getSupabaseBrowserClient } from '../../../lib/supabase/client'
+import { getSupabaseBrowserClient } from '../../../lib/supabase/client'
 import { isMissingHistoryTable, practiceKindFilter } from '../../exam/core/practice-attempt'
 import {
   fetchSchoolExamCatalog,
