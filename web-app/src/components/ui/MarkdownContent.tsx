@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
+import { normalizeMarkdown } from './normalize-markdown'
 
 type MarkdownContentProps = {
   content: string
@@ -34,14 +35,6 @@ const components: Components = {
       {children}
     </code>
   ),
-}
-
-function normalizeMarkdown(content: string) {
-  return content
-    .replace(/\\\$/g, '$')
-    .replace(/\\\(([\s\S]*?)\\\)/g, (_match, expression: string) => `$${expression}$`)
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, expression: string) => `$$${expression}$$`)
-    .trim()
 }
 
 export function MarkdownContent({ content, className = '' }: MarkdownContentProps) {

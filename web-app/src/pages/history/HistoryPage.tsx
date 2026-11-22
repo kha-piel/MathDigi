@@ -22,6 +22,8 @@ import {
 import { useFlaggedWrongQuestionStore } from '../../features/practice/store/flagged-wrong-question-store'
 import { settleHistorySource } from '../../features/history/services/history-source'
 import { hasSupabaseEnv } from '../../lib/config/env'
+import { MarkdownContent } from '../../components/ui/MarkdownContent'
+import { normalizeSchoolExamMarkdown } from '../../features/practice/utils/school-exam-content'
 
 type HistoryTab = 'school_exams' | 'practice' | 'ai'
 
@@ -414,7 +416,8 @@ export function HistoryPage() {
                     <div className="text-xs font-semibold text-slate-500">{formatDateTime(message.createdAt)}</div>
                   </div>
                   <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-7 text-slate-700">
-                    <strong>{formatRole(message.role)}:</strong> {message.content}
+                    <strong>{formatRole(message.role)}:</strong>
+                    <MarkdownContent content={message.content} className="text-sm leading-7 text-slate-700" />
                   </div>
                 </article>
               ))}
@@ -447,11 +450,18 @@ export function HistoryPage() {
                       {answer.isCorrect ? 'Đúng' : 'Sai'}
                     </span>
                   </div>
-                  <p className="mt-2 text-sm text-slate-600">
-                    Bạn chọn: {answer.selectedAnswer || '--'} | Đáp án đúng: {answer.correctAnswer || '--'}
-                  </p>
+                  <div className="mt-2 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
+                    <div>
+                      <div className="font-semibold">Bạn chọn:</div>
+                      <MarkdownContent content={answer.selectedAnswer || '--'} />
+                    </div>
+                    <div>
+                      <div className="font-semibold">Đáp án đúng:</div>
+                      <MarkdownContent content={answer.correctAnswer || '--'} />
+                    </div>
+                  </div>
                   {answer.questionContent ? (
-                    <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-700">{answer.questionContent}</p>
+                    <MarkdownContent content={normalizeSchoolExamMarkdown(answer.questionContent)} className="mt-2 text-sm leading-6 text-slate-700" />
                   ) : null}
                 </article>
               ))}
