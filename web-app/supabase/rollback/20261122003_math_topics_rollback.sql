@@ -20,7 +20,7 @@ begin
   alter table public.questions drop column topic_id;
   if (state->>'added_policies')::boolean then
     drop policy math_topics_public_select on public.topics;
-    drop policy math_topics_admin_write on public.topics;
+    drop policy if exists math_topics_admin_write on public.topics;
     alter table public.topics disable row level security;
   end if;
   delete from public.topics where topic_id in

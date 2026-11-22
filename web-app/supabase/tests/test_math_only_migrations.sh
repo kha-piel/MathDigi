@@ -359,7 +359,18 @@ alter table public.school_exam_question_assets rename to question_assets;
 create table public.subjects(subject_id uuid primary key default gen_random_uuid(),subject_code text,subject_name text,is_active boolean default true);
 insert into public.subjects(subject_code,subject_name) values ('TOAN','Toán học');
 SQL
-for file in "$PRE" "$M1" "$M2" "$M3" "$R3" "$R2" "$R1"; do
+for file in "$PRE" "$M1" "$M2" "$M3"; do
+  sql -d empty_case < "$file" >> "$WORK/empty.log" 2>&1 || { cat "$WORK/empty.log"; exit 1; }
+done
+[[ $(sql -d empty_case -Atc "select relrowsecurity and has_table_privilege('anon',oid,'SELECT') and has_table_privilege('authenticated',oid,'SELECT') and not has_table_privilege('authenticated',oid,'INSERT,UPDATE,DELETE') and not has_table_privilege('anon',oid,'INSERT,UPDATE,DELETE') from pg_class where oid='public.topics'::regclass") == t ]]
+for role in anon authenticated; do
+  sql -d empty_case -c "set role $role; select * from public.topics" > /dev/null
+  if sql -d empty_case -c "set role $role; insert into public.topics(subject_id,topic_name) select subject_id,'Forbidden' from public.topics limit 1" > "$WORK/rejected.log" 2>&1; then
+    echo "FAIL: $role can write topics without admin helper"; exit 1
+  fi
+done
+echo 'PASS: created topics without admin helper has RLS, public reads and no student writes'
+for file in "$R3" "$R2" "$R1"; do
   sql -d empty_case < "$file" >> "$WORK/empty.log" 2>&1 || { cat "$WORK/empty.log"; exit 1; }
 done
 echo 'PASS: empty database, missing topics creation/rollback, absent admin helper and Storage schema'
