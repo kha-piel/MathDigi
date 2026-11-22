@@ -93,7 +93,7 @@ type SchoolExamAttemptRow = {
   skipped_count: number
   total_count: number
   completed_at: string
-  school_exams:
+  exams:
     | {
         title: string
         school_name: string
@@ -110,7 +110,7 @@ type SchoolExamAttemptRow = {
 }
 
 type SchoolExamAttemptDetailRow = SchoolExamAttemptRow & {
-  student_school_exam_answers:
+  student_answers:
     | {
         question_number: number
         question_type: string
@@ -121,7 +121,7 @@ type SchoolExamAttemptDetailRow = SchoolExamAttemptRow & {
         topic: string | null
       }[]
     | null
-  student_school_exam_ai_messages:
+  student_ai_messages:
     | {
         message_id: string
         question_number: number | null
@@ -139,9 +139,9 @@ type SchoolExamAiMessageRow = {
   role: 'user' | 'assistant' | 'system'
   content: string
   created_at: string
-  student_school_exam_attempts:
+  student_attempts:
     | {
-        school_exams:
+        exams:
           | {
               title: string
               school_name: string
@@ -153,7 +153,7 @@ type SchoolExamAiMessageRow = {
           | null
       }
     | {
-        school_exams:
+        exams:
           | {
               title: string
               school_name: string
@@ -172,7 +172,7 @@ export async function persistCompletedSchoolExamAttempt(input: PersistSchoolExam
   const completedAtIso = new Date(input.completedAt).toISOString()
 
   const { data: createdAttempt, error: attemptError } = await supabase
-    .from('student_school_exam_attempts')
+    .from('student_attempts')
     .insert({
       user_id: input.userId,
       school_exam_id: input.schoolExamId,
@@ -194,7 +194,7 @@ export async function persistCompletedSchoolExamAttempt(input: PersistSchoolExam
   }
 
   if (input.answers.length > 0) {
-    const { error: answersError } = await supabase.from('student_school_exam_answers').insert(
+    const { error: answersError } = await supabase.from('student_answers').insert(
       input.answers.map((answer) => ({
         attempt_id: createdAttempt.attempt_id,
         question_number: answer.questionNumber,
@@ -229,7 +229,7 @@ export async function saveSchoolExamAiMessages(
   }
 
   const supabase = getSupabaseBrowserClient()
-  const { error } = await supabase.from('student_school_exam_ai_messages').insert(
+  const { error } = await supabase.from('student_ai_messages').insert(
     messages
       .filter((message) => message.content.trim())
       .map((message) => ({
@@ -251,8 +251,8 @@ export async function fetchSchoolExamAttemptHistory(
 ): Promise<SchoolExamAttemptHistoryItem[]> {
   const supabase = getSupabaseBrowserClient()
   const { data, error } = await supabase
-    .from('student_school_exam_attempts')
-    .select('attempt_id, school_exam_id, variant_code, score, correct_count, wrong_count, skipped_count, total_count, completed_at, school_exams(title, school_name, subject_name, year)')
+    .from('student_attempts')
+    .select('attempt_id, school_exam_id, variant_code, score, correct_count, wrong_count, skipped_count, total_count, completed_at, exams(title, school_name, subject_name, year)')
     .eq('user_id', userId)
     .order('completed_at', { ascending: false })
     .returns<SchoolExamAttemptRow[]>()
@@ -269,8 +269,8 @@ export async function fetchSchoolExamAttemptDetail(
 ): Promise<SchoolExamAttemptDetail | null> {
   const supabase = getSupabaseBrowserClient()
   const { data, error } = await supabase
-    .from('student_school_exam_attempts')
-    .select('attempt_id, school_exam_id, variant_code, score, correct_count, wrong_count, skipped_count, total_count, completed_at, school_exams(title, school_name, subject_name, year), student_school_exam_answers(question_number, question_type, selected_answer, correct_answer, is_correct, question_content, topic), student_school_exam_ai_messages(message_id, question_number, role, content, created_at)')
+    .from('student_attempts')
+    .select('attempt_id, school_exam_id, variant_code, score, correct_count, wrong_count, skipped_count, total_count, completed_at, exams(title, school_name, subject_name, year), student_answers(question_number, question_type, selected_answer, correct_answer, is_correct, question_content, topic), student_ai_messages(message_id, question_number, role, content, created_at)')
     .eq('attempt_id', attemptId)
     .maybeSingle<SchoolExamAttemptDetailRow>()
 
@@ -285,7 +285,7 @@ export async function fetchSchoolExamAttemptDetail(
   const base = mapAttemptHistoryRow(data)
   return {
     ...base,
-    answers: [...(data.student_school_exam_answers ?? [])]
+    answers: [...(data.student_answers ?? [])]
       .sort((left, right) => left.question_number - right.question_number)
       .map((answer) => ({
         questionNumber: answer.question_number,
@@ -296,7 +296,7 @@ export async function fetchSchoolExamAttemptDetail(
         questionContent: answer.question_content ?? '',
         topic: answer.topic ?? '',
       })),
-    aiMessages: [...(data.student_school_exam_ai_messages ?? [])]
+    aiMessages: [...(data.student_ai_messages ?? [])]
       .sort((left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime())
       .map((message) => ({
         messageId: message.message_id,
@@ -316,9 +316,9 @@ export async function fetchSchoolExamAiHistory(
 ): Promise<SchoolExamAiHistoryMessage[]> {
   const supabase = getSupabaseBrowserClient()
   const { data, error } = await supabase
-    .from('student_school_exam_ai_messages')
-    .select('message_id, attempt_id, question_number, role, content, created_at, student_school_exam_attempts!inner(user_id, school_exams(title, school_name))')
-    .eq('student_school_exam_attempts.user_id', userId)
+    .from('student_ai_messages')
+    .select('message_id, attempt_id, question_number, role, content, created_at, student_attempts!inner(user_id, exams(title, school_name))')
+    .eq('student_attempts.user_id', userId)
     .order('created_at', { ascending: false })
     .returns<SchoolExamAiMessageRow[]>()
 
@@ -327,8 +327,8 @@ export async function fetchSchoolExamAiHistory(
   }
 
   return data.map((message) => {
-    const attempt = unwrapSingle(message.student_school_exam_attempts)
-    const exam = unwrapSingle(attempt?.school_exams)
+    const attempt = unwrapSingle(message.student_attempts)
+    const exam = unwrapSingle(attempt?.exams)
     return {
       messageId: message.message_id,
       attemptId: message.attempt_id,
@@ -349,7 +349,7 @@ export async function fetchSchoolExamAiHistory(
 }
 
 function mapAttemptHistoryRow(row: SchoolExamAttemptRow): SchoolExamAttemptHistoryItem {
-  const exam = unwrapSingle(row.school_exams)
+  const exam = unwrapSingle(row.exams)
   return {
     attemptId: row.attempt_id,
     schoolExamId: row.school_exam_id,
@@ -385,17 +385,17 @@ function formatStudentLearningHistoryError(rawMessage: string | undefined, actio
   const message = rawMessage?.trim() || 'Unknown error'
 
   if (
-    message.includes('student_school_exam_attempts')
+    message.includes('student_attempts')
     && (message.includes('schema cache') || message.toLowerCase().includes('could not find the table'))
   ) {
-    return `Khong the ${action}: Supabase chua co bang student_school_exam_attempts. Hay chay file web-app/supabase/setup_student_learning_history.sql trong SQL Editor roi thu lai.`
+    return `Khong the ${action}: Supabase chua co bang student_attempts. Vui long kiem tra schema Supabase.`
   }
 
   if (
-    (message.includes('student_school_exam_answers') || message.includes('student_school_exam_ai_messages'))
+    (message.includes('student_answers') || message.includes('student_ai_messages'))
     && (message.includes('schema cache') || message.toLowerCase().includes('could not find the table'))
   ) {
-    return `Khong the ${action}: Supabase chua co bang lich su hoc tap de truong. Hay chay file web-app/supabase/setup_student_learning_history.sql trong SQL Editor roi thu lai.`
+    return `Khong the ${action}: Supabase chua co bang lich su hoc tap de truong. Vui long kiem tra schema Supabase.`
   }
 
   return `Khong the ${action}: ${message}`
