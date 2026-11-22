@@ -716,7 +716,7 @@ export function SchoolExamPage() {
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr] items-start">
-          <section className="sticky top-6 rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)]">
+          <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)] xl:sticky xl:top-6">
             <h2 className="text-xl font-bold text-slate-950">Thống kê nhanh</h2>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <SummaryTile label="Äúng" value={`${summary.correctCount}`} tone="emerald" />
@@ -838,10 +838,12 @@ export function SchoolExamPage() {
                       className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-[0.12em] ${
                         selectedReviewItem.correct
                           ? 'bg-emerald-100 text-emerald-700'
-                          : 'bg-rose-100 text-rose-700'
+                          : selectedReviewItem.answered
+                            ? 'bg-rose-100 text-rose-700'
+                            : 'bg-slate-100 text-slate-700'
                       }`}
                     >
-                      {selectedReviewItem.correct ? 'Äúng' : 'Sai'}
+                      {formatReviewStatus(selectedReviewItem)}
                     </div>
                     <div className="text-sm leading-7 text-slate-600">
                       Topic: {selectedReviewItem.topic || 'Chưa gán topic'}
@@ -1539,20 +1541,29 @@ function ReviewItemSection({
                 ? 'border-slate-950 bg-slate-950 text-white'
                 : item.correct
                   ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-300'
-                  : 'border-rose-200 bg-rose-50 text-rose-800 hover:border-rose-300'
+                  : item.answered
+                    ? 'border-rose-200 bg-rose-50 text-rose-800 hover:border-rose-300'
+                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300'
             }`}
             onClick={() => onSelect(item.questionNumber)}
             type="button"
           >
             <div className="text-sm font-bold">{item.displayQuestionLabel}</div>
             <div className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] opacity-80">
-              {item.correct ? 'Äúng' : 'Sai'} | {formatPartLabel(item.partCode)}
+              {formatReviewStatus(item)} | {formatPartLabel(item.partCode)}
             </div>
           </button>
         ))}
       </div>
     </section>
   )
+}
+
+function formatReviewStatus(item: ReviewItem) {
+  if (item.correct) {
+    return 'Đúng'
+  }
+  return item.answered ? 'Sai' : 'Bỏ qua'
 }
 
 function formatDuration(totalSeconds: number) {
