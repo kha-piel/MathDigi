@@ -96,6 +96,7 @@ type SchoolExamQuestionAssetRow = {
   asset_type: 'question_block' | 'figure' | 'table' | 'other'
   asset_path: string
   display_order: number
+  import_archived?: boolean
 }
 
 type SchoolExamQuestionBankRow = SchoolExamQuestionRow & {
@@ -114,6 +115,13 @@ type SchoolExamQuestionBankRow = SchoolExamQuestionRow & {
 const schoolExamCatalogCache = new Map<string, Promise<PracticeExamCatalogItem[]>>()
 const schoolExamDetailCache = new Map<string, Promise<SchoolExamPaperRecord | null>>()
 const schoolExamQuestionCache = new Map<string, Promise<SchoolExamQuestionRecord[]>>()
+export function invalidateSchoolExamCaches() {
+  schoolExamCatalogCache.clear()
+  schoolExamDetailCache.clear()
+  schoolExamQuestionCache.clear()
+  schoolExamQuestionSummaryCache.clear()
+}
+
 const schoolExamQuestionSummaryCache = new Map<string, Promise<SchoolExamQuestionSummary[]>>()
 
 type SchoolExamQuestionSummary = {
@@ -283,7 +291,7 @@ async function fetchSchoolExamQuestionsUncached(examId: string): Promise<SchoolE
   const { data, error } = await supabase
     .from('questions')
     .select(
-      'question_id, exam_id, question_number, question_type, question_text, correct_answer, statement_json, topic, obsidian_source_path, has_image, metadata, options:question_options(option_label, option_text, display_order), assets:question_assets(asset_type, asset_path, display_order)',
+      'question_id, exam_id, question_number, difficulty_level, question_type, question_text, correct_answer, statement_json, topic, obsidian_source_path, has_image, metadata, options:question_options(option_label, option_text, display_order), assets:question_assets(*)',
     )
     .eq('exam_id', examId)
     .order('question_number', { ascending: true })
@@ -362,7 +370,7 @@ async function fetchSchoolExamQuestionBankUncached(subjectId: string): Promise<S
     data = await fetchQuestionPages<SchoolExamQuestionBankRow>((start, end) => supabase
       .from('questions')
       .select(
-        'question_id, exam_id, question_number, difficulty_level, question_type, question_text, correct_answer, statement_json, topic, obsidian_source_path, has_image, metadata, options:question_options(option_label, option_text, display_order), assets:question_assets(asset_type, asset_path, display_order), exam:exams!inner(exam_id, title, school_name, year, pdf_url, tags, is_active, subject_code)',
+        'question_id, exam_id, question_number, difficulty_level, question_type, question_text, correct_answer, statement_json, topic, obsidian_source_path, has_image, metadata, options:question_options(option_label, option_text, display_order), assets:question_assets(*), exam:exams!inner(exam_id, title, school_name, year, pdf_url, tags, is_active, subject_code)',
       )
       .eq('exam.subject_code', subjectId)
       .eq('exam.is_active', true)
@@ -696,7 +704,8 @@ async function buildFallbackQuestionRecords(examId: string): Promise<SchoolExamQ
 function mapQuestionAssets(
   assets: SchoolExamQuestionAssetRow[] | null | undefined,
 ): SchoolExamQuestionAssetRecord[] {
-  return [...(assets ?? [])]
+  return (assets ?? [])
+    .filter((asset) => !asset.import_archived)
     .sort((left, right) => left.display_order - right.display_order)
     .map((asset) => ({
       assetType: asset.asset_type,

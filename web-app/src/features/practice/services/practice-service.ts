@@ -1,6 +1,6 @@
 import { buildBlueprintQuestions, type PracticeSelectionMode } from './practice-exam-builder'
 import { practiceBlueprints } from '../data/practice-blueprints'
-import { fetchSchoolExamQuestionBank, fetchSchoolExamQuestionSummary } from './school-exam-service'
+import { fetchSchoolExamQuestionBank, fetchSchoolExamQuestionSummary, invalidateSchoolExamCaches } from './school-exam-service'
 import { normalizeSchoolExamMarkdown } from '../utils/school-exam-content'
 import type {
   PracticeBlueprint,
@@ -21,6 +21,10 @@ const SUBJECT_ID_TO_CODE: Record<string, string> = {
   TOAN: 'TOAN',
   VAT_LY: 'VAT_LY',
   HOA_HOC: 'HOA_HOC',
+}
+
+export function invalidatePracticeQuestionBankCache() {
+  invalidateSchoolExamCaches()
 }
 
 export function searchPracticeExamCatalog(

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { setTutorContext, clearTutorContext, setTutorDisabled, TUTOR_EXAM_DISABLED } from '../../features/tutor-chat/store'
+import { resolveTutorReviewItem } from '../../features/tutor-chat/review-context'
 import { Link, useBlocker, useParams } from 'react-router-dom'
 import { PageCard } from '../../components/ui/PageCard'
 import { MarkdownContent } from '../../components/ui/MarkdownContent'
@@ -39,6 +41,7 @@ type ReviewItem = {
   displayQuestionLabel: string
   selectedAnswer: string
   correctAnswer: string
+  answered: boolean
   correct: boolean
   questionContent: string
   questionStem: string
@@ -76,12 +79,20 @@ export function SchoolExamPage() {
   const [weaknessAnalysisError, setWeaknessAnalysisError] = useState('')
 
   const [selectedReviewQuestionNumber, setSelectedReviewQuestionNumber] = useState<number | null>(null)
+  const [practiceTutorQuestionNumber, setPracticeTutorQuestionNumber] = useState<number | null>(null)
   const [selectedReviewChatInput, setSelectedReviewChatInput] = useState('')
   const [aiChatHistoryByQuestion, setAiChatHistoryByQuestion] = useState<Record<number, ReviewChatMessage[]>>({})
   const [isSavingAttempt, setIsSavingAttempt] = useState(false)
   const [schoolAttemptId, setSchoolAttemptId] = useState('')
   const [isConfirmSubmitOpen, setIsConfirmSubmitOpen] = useState(false)
   const startedAtRef = useRef(Date.now())
+  const lastTutorReviewQuestionNumber = useRef<number | null>(null)
+
+  const tutorExamRunning = Boolean(exam && exam.durationMinutes > 0 && !submitted)
+  useEffect(() => {
+    setTutorDisabled(tutorExamRunning ? TUTOR_EXAM_DISABLED : null)
+    return () => setTutorDisabled(null)
+  }, [tutorExamRunning])
 
   useEffect(() => {
     let isMounted = true
@@ -106,6 +117,8 @@ export function SchoolExamPage() {
         setRecommendedTopics([])
         setWeaknessAnalysisError('')
         setSelectedReviewQuestionNumber(null)
+        setPracticeTutorQuestionNumber(null)
+        lastTutorReviewQuestionNumber.current = null
         setSelectedReviewChatInput('')
         setAiChatHistoryByQuestion({})
         setSchoolAttemptId('')
@@ -344,6 +357,7 @@ export function SchoolExamPage() {
             displayQuestionLabel,
             selectedAnswer,
             correctAnswer,
+            answered: Boolean(selectedChoices[questionKey]),
             correct: selectedChoices[questionKey] === (answerKeyByQuestionNumber[questionNumber] ?? ''),
             questionContent,
             questionStem,
@@ -386,6 +400,7 @@ export function SchoolExamPage() {
             displayQuestionLabel,
             selectedAnswer,
             correctAnswer,
+            answered: labels.every((label) => label in selectedMap),
             correct,
             questionContent,
             questionStem,
@@ -407,6 +422,7 @@ export function SchoolExamPage() {
           displayQuestionLabel,
           selectedAnswer,
           correctAnswer,
+          answered: Boolean(shortAnswers[questionKey]?.trim()),
           correct: acceptedResponses.some((candidate) => normalizeAnswer(candidate) === normalizeAnswer(selectedAnswer)),
           questionContent,
           questionStem,
@@ -423,9 +439,13 @@ export function SchoolExamPage() {
     return items
   }, [aiExplanationByQuestion, answerKeyByQuestionNumber, exam, questionRecordByNumber, selectedChoices, selectedTrueFalse, shortAnswers])
 
-  const wrongReviewItems = useMemo(
+  const missedReviewItems = useMemo(
     () => reviewItems.filter((item) => !item.correct),
     [reviewItems],
+  )
+  const wrongReviewItems = useMemo(
+    () => missedReviewItems.filter((item) => item.answered),
+    [missedReviewItems],
   )
 
   const reviewItemsByPart = useMemo(
@@ -443,6 +463,34 @@ export function SchoolExamPage() {
     }
     return reviewItems.find((item) => item.questionNumber === selectedReviewQuestionNumber) ?? null
   }, [reviewItems, selectedReviewQuestionNumber])
+
+  useEffect(() => {
+    if (selectedReviewItem) lastTutorReviewQuestionNumber.current = selectedReviewItem.questionNumber
+    const item = submitted
+      ? resolveTutorReviewItem(reviewItems, selectedReviewItem?.questionNumber ?? null, lastTutorReviewQuestionNumber.current)
+      : resolveTutorReviewItem(reviewItems, practiceTutorQuestionNumber, null)
+    if ((submitted || (exam && exam.durationMinutes <= 0)) && item) setTutorContext({
+      question_number: item.questionNumber,
+      question_content: item.questionContent,
+      options: [
+        ...item.options.map((option) => `${option.optionLabel}. ${option.optionText}`),
+        ...item.statements.map((statement) => `${statement.label}. ${statement.text}`),
+      ],
+      question_type: item.partCode,
+      topic: item.topic,
+      student_answer: item.selectedAnswer,
+      correct_answer: item.correctAnswer,
+      solution: item.explanation,
+      source: 'school_exam', exam_id: examId, attempt_id: schoolAttemptId,
+    })
+    else clearTutorContext()
+    return clearTutorContext
+  }, [selectedReviewItem, reviewItems, submitted, examId, schoolAttemptId, exam, practiceTutorQuestionNumber])
+
+  function selectTutorQuestion(questionNumber: number) {
+    if (tutorExamRunning) return
+    setPracticeTutorQuestionNumber(questionNumber)
+  }
 
   async function handleExplainWrongAnswer(item: ReviewItem) {
     if (!item.questionContent.trim()) {
@@ -625,7 +673,7 @@ export function SchoolExamPage() {
 
 
   async function handleAnalyzeWeaknesses() {
-    if (wrongReviewItems.length === 0) {
+    if (missedReviewItems.length === 0) {
       setWeaknessAnalysis('Bạn không có câu sai nào trong bài này.')
       setRecommendedTopics([])
       setWeaknessAnalysisError('')
@@ -637,7 +685,7 @@ export function SchoolExamPage() {
 
     try {
       const result = await requestWeaknessAnalysis(
-        wrongReviewItems.map((item) => ({
+        missedReviewItems.map((item) => ({
           questionId: String(item.questionNumber),
           questionContent: item.questionContent || item.displayQuestionLabel,
           topic: item.topic || exam?.subjectName || 'Chưa xác định chuyên đề',
@@ -648,7 +696,7 @@ export function SchoolExamPage() {
       setWeaknessAnalysis(result)
       setRecommendedTopics(
         inferKnowledgeReviewTopics(
-          wrongReviewItems.flatMap((item) => [
+          missedReviewItems.flatMap((item) => [
             item.topic,
             item.obsidianSourcePath,
             item.questionContent,
@@ -712,7 +760,7 @@ export function SchoolExamPage() {
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr] items-start">
-          <section className="sticky top-6 rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)]">
+          <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)] xl:sticky xl:top-6">
             <h2 className="text-xl font-bold text-slate-950">Thống kê nhanh</h2>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <SummaryTile label="Đúng" value={`${summary.correctCount}`} tone="emerald" />
@@ -803,7 +851,7 @@ export function SchoolExamPage() {
         </div>
 
         {selectedReviewItem ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
+          <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
             <div className="flex h-[92vh] w-full max-w-[1320px] flex-col overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_40px_120px_rgba(15,23,42,0.24)]">
               <div className="shrink-0 flex items-center justify-between gap-4 border-b border-slate-200 px-6 py-5">
                 <div>
@@ -834,10 +882,12 @@ export function SchoolExamPage() {
                       className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-[0.12em] ${
                         selectedReviewItem.correct
                           ? 'bg-emerald-100 text-emerald-700'
-                          : 'bg-rose-100 text-rose-700'
+                          : selectedReviewItem.answered
+                            ? 'bg-rose-100 text-rose-700'
+                            : 'bg-slate-100 text-slate-700'
                       }`}
                     >
-                      {selectedReviewItem.correct ? 'Đúng' : 'Sai'}
+                      {formatReviewStatus(selectedReviewItem)}
                     </div>
                     <div className="text-sm leading-7 text-slate-600">
                       Topic: {selectedReviewItem.topic || 'Chưa gán topic'}
@@ -1100,6 +1150,8 @@ export function SchoolExamPage() {
                     return (
                       <article
                         key={questionNumber}
+                        onClick={() => selectTutorQuestion(questionNumber)}
+                        onFocusCapture={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
@@ -1157,6 +1209,8 @@ export function SchoolExamPage() {
                     return (
                       <article
                         key={questionNumber}
+                        onClick={() => selectTutorQuestion(questionNumber)}
+                        onFocusCapture={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
@@ -1236,6 +1290,8 @@ export function SchoolExamPage() {
                     return (
                       <article
                         key={questionNumber}
+                        onClick={() => selectTutorQuestion(questionNumber)}
+                        onFocusCapture={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
@@ -1531,20 +1587,29 @@ function ReviewItemSection({
                 ? 'border-slate-950 bg-slate-950 text-white'
                 : item.correct
                   ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-300'
-                  : 'border-rose-200 bg-rose-50 text-rose-800 hover:border-rose-300'
+                  : item.answered
+                    ? 'border-rose-200 bg-rose-50 text-rose-800 hover:border-rose-300'
+                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300'
             }`}
             onClick={() => onSelect(item.questionNumber)}
             type="button"
           >
             <div className="text-sm font-bold">{item.displayQuestionLabel}</div>
             <div className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] opacity-80">
-              {item.correct ? 'Đúng' : 'Sai'} | {formatPartLabel(item.partCode)}
+              {formatReviewStatus(item)} | {formatPartLabel(item.partCode)}
             </div>
           </button>
         ))}
       </div>
     </section>
   )
+}
+
+function formatReviewStatus(item: ReviewItem) {
+  if (item.correct) {
+    return 'Đúng'
+  }
+  return item.answered ? 'Sai' : 'Bỏ qua'
 }
 
 function formatDuration(totalSeconds: number) {
@@ -1696,4 +1761,3 @@ const styles = {
     color: '#5d7491',
   },
 }
-

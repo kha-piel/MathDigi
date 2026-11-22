@@ -14,10 +14,11 @@ import { toast } from 'sonner'
 import { useAuthSessionStore } from '../../features/auth/store/auth-session-store'
 import {
   createEmptyMetadata,
-  deleteManagedImportedExam,
+  setManagedExamImportState,
   fetchManagedImportedExamDraft,
   fetchManagedImportedExams,
   getDraftValidationIssues,
+  getPdfFileTypeIssue,
   getQuestionValidationIssues,
   requestExamPdfValidation,
   saveAdminImportedExam,
@@ -70,7 +71,8 @@ export function ImportExamPage() {
   const [isValidating, setIsValidating] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [validationStatus, setValidationStatus] = useState('')
-  const [apiError, setApiError] = useState('')
+  const [importError, setImportError] = useState<{ stage: 'analysis' | 'save'; message: string } | null>(null)
+  const [importReport, setImportReport] = useState<Awaited<ReturnType<typeof saveAdminImportedExam>> | null>(null)
   const [result, setResult] = useState<AdminImportValidationResponse | null>(null)
   const [managedExams, setManagedExams] = useState<ManagedImportedExam[]>([])
   const [isLoadingManagedExams, setIsLoadingManagedExams] = useState(true)
@@ -83,6 +85,7 @@ export function ImportExamPage() {
   const [managedDraft, setManagedDraft] = useState<AdminImportValidationResponse | null>(null)
   const [isLoadingManagedDraft, setIsLoadingManagedDraft] = useState(false)
   const [isSavingManagedDraft, setIsSavingManagedDraft] = useState(false)
+  const [managedDraftDirty, setManagedDraftDirty] = useState(false)
 
   const draftIssues = useMemo(() => {
     return getDraftValidationIssues({
@@ -120,7 +123,7 @@ export function ImportExamPage() {
       setManagedExams(exams)
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Khong the tai danh sach de da nhap.'
+        error instanceof Error ? error.message : 'Không thể tải danh sách đề đã nhập.'
       setManagerError(message)
     } finally {
       setIsLoadingManagedExams(false)
@@ -152,15 +155,16 @@ export function ImportExamPage() {
   }
 
   function handleSelectedFile(file: File) {
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-      toast.error('Chi ho tro upload file PDF.')
+    const fileTypeIssue = getPdfFileTypeIssue(file)
+    if (fileTypeIssue) {
+      toast.error(fileTypeIssue)
       return
     }
 
     setPdfFile(file)
-    setApiError('')
+    setImportError(null)
     setResult(null)
-    toast.success(`Da chon PDF: ${file.name}`)
+    toast.success(`Đã chọn PDF: ${file.name}`)
   }
 
   function handlePickFile(event: ChangeEvent<HTMLInputElement>) {
@@ -182,26 +186,26 @@ export function ImportExamPage() {
 
   async function handleValidate() {
     if (!pdfFile) {
-      toast.error('Hay upload PDF truoc khi phan tich.')
+      toast.error('Hãy chọn tệp PDF trước khi phân tích.')
       return
     }
 
     const requiredFields: Array<[string, string]> = [
-      ['Ten truong', metadata.schoolName],
-      ['Thanh pho', metadata.city],
-      ['Nam thi', metadata.year],
-      ['Ma de', metadata.variantCode],
+      ['Tên trường', metadata.schoolName],
+      ['Thành phố', metadata.city],
+      ['Năm thi', metadata.year],
+      ['Mã đề', metadata.variantCode],
     ]
     const missingField = requiredFields.find(([, value]) => !value.trim())
     if (missingField) {
-      toast.error(`Thieu ${missingField[0]}.`)
+      toast.error(`Thiếu ${missingField[0]}.`)
       return
     }
 
     try {
       setIsValidating(true)
-      setApiError('')
-      setValidationStatus('Dang chuan bi upload PDF...')
+      setImportError(null)
+      setValidationStatus('Đang chuẩn bị tải PDF lên...')
       const payload = await requestExamPdfValidation({
         pdfFile,
         metadata,
@@ -212,14 +216,14 @@ export function ImportExamPage() {
       setResult(payload)
 
       if (payload.questions.length > 0) {
-        toast.success(`AI da trich xuat ${payload.questions.length} cau hoi tu PDF.`)
+        toast.success(`AI đã trích xuất ${payload.questions.length} câu hỏi từ PDF.`)
       } else {
-        toast.warning('AI chua trich xuat duoc cau hoi nao. Hay kiem tra PDF.')
+        toast.warning('AI chưa trích xuất được câu hỏi nào. Hãy kiểm tra PDF.')
       }
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Khong the phan tich PDF luc nay.'
-      setApiError(message)
+        error instanceof Error ? error.message : 'Không thể phân tích PDF lúc này.'
+      setImportError({ stage: 'analysis', message })
       toast.error(message)
     } finally {
       setIsValidating(false)
@@ -228,26 +232,20 @@ export function ImportExamPage() {
   }
 
   async function handleSave() {
-    if (!result || !pdfFile) {
-      toast.error('Can phan tich PDF truoc khi luu.')
-      return
-    }
-
-    if (draftIssues.length > 0) {
-      toast.error(draftIssues[0] ?? 'Du lieu chua hop le de luu.')
-      return
-    }
-
+    if (!result || !pdfFile || !result.questions.length) return
     try {
       setIsSaving(true)
-      const saved = await saveAdminImportedExam({
-        pdfFile,
-        draft: result,
-      })
-      toast.success(`Da luu ${saved.questionCount} cau vao exam ${saved.examId}.`)
-      void loadManagedExams()
+      setImportError(null)
+      setImportReport(null)
+      const saved = await saveAdminImportedExam({ pdfFile, draft: result })
+      setImportReport(saved)
+      setResult(null)
+      setPdfFile(null)
+      toast.success(`Đã lưu bản nháp ${saved.questionCount} câu. Hãy duyệt trước khi xuất bản.`)
+      await loadManagedExams()
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Khong the luu vao Supabase.'
+      const message = error instanceof Error ? error.message : 'Không thể lưu vào Supabase.'
+      setImportError({ stage: 'save', message })
       toast.error(message)
     } finally {
       setIsSaving(false)
@@ -320,7 +318,7 @@ export function ImportExamPage() {
 
   async function addQuestionAsset(index: number, file: File) {
     if (!file.type.startsWith('image/')) {
-      toast.error('Chi ho tro file anh PNG/JPG/WebP cho asset cau hoi.')
+      toast.error('Chỉ hỗ trợ ảnh PNG, JPG hoặc WebP cho câu hỏi.')
       return
     }
 
@@ -359,9 +357,9 @@ export function ImportExamPage() {
           }),
         }
       })
-      toast.success(`Da them anh vao cau ${result?.questions[index]?.questionNumber ?? index + 1}.`)
+      toast.success(`Đã thêm ảnh vào câu ${result?.questions[index]?.questionNumber ?? index + 1}.`)
     } catch {
-      toast.error('Khong doc duoc file anh vua chon.')
+      toast.error('Không đọc được tệp ảnh vừa chọn.')
     }
   }
 
@@ -411,9 +409,10 @@ export function ImportExamPage() {
       setIsLoadingManagedDraft(true)
       const draft = await fetchManagedImportedExamDraft(exam.examId)
       setManagedDraft(draft)
+      setManagedDraftDirty(false)
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Khong the mo editor cau hoi cua de thi.'
+        error instanceof Error ? error.message : 'Không thể mở trình chỉnh sửa câu hỏi của đề thi.'
       toast.error(message)
       setEditingQuestionExamId(null)
       setManagedDraft(null)
@@ -446,7 +445,7 @@ export function ImportExamPage() {
       !managedForm.year.trim() ||
       !managedForm.durationMinutes.trim()
     ) {
-      toast.error('Hay dien du thong tin truoc khi cap nhat de thi.')
+      toast.error('Hãy điền đủ thông tin trước khi cập nhật đề thi.')
       return
     }
 
@@ -463,47 +462,50 @@ export function ImportExamPage() {
         variantCode: managedForm.variantCode,
         isActive: managedForm.isActive,
       })
-      toast.success('Da cap nhat thong tin de thi.')
+      toast.success('Đã cập nhật thông tin đề thi.')
       stopEditingManagedExam()
       await loadManagedExams()
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Khong the cap nhat de thi luc nay.'
+        error instanceof Error ? error.message : 'Không thể cập nhật đề thi lúc này.'
       toast.error(message)
     } finally {
       setIsUpdatingManagedExam(false)
     }
   }
 
-  async function handleDeleteManagedExam(exam: ManagedImportedExam) {
-    const confirmed = window.confirm(
-      `Ban co chac muon xoa de "${exam.title}"? Thao tac nay se xoa de, cau hoi va dap an lien quan.`,
-    )
-    if (!confirmed) {
-      return
-    }
-
+  async function handleArchiveManagedExam(exam: ManagedImportedExam) {
+    if (!window.confirm(`Ẩn đề "${exam.title}" khỏi học sinh? Dữ liệu và tệp được giữ lại.`)) return
     try {
       setDeletingExamId(exam.examId)
-      await deleteManagedImportedExam({
-        examId: exam.examId,
-        subjectCode: exam.subjectCode,
-        year: exam.year,
-      })
-      toast.success('Da xoa de thi khoi he thong.')
-      if (editingExamId === exam.examId) {
-        stopEditingManagedExam()
-      }
+      const state = await setManagedExamImportState(exam.examId, 'undo')
+      toast.success(state === 'undone' ? 'Đã hoàn tác nhập đề. Dữ liệu được giữ lại để có thể khôi phục.' : 'Đã ẩn đề. Các bài làm của học sinh được giữ nguyên.')
+      if (editingQuestionExamId === exam.examId) closeManagedQuestionEditor()
+      if (editingExamId === exam.examId) stopEditingManagedExam()
       await loadManagedExams()
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Khong the xoa de thi luc nay.'
-      toast.error(message)
+      toast.error(error instanceof Error ? error.message : 'Không thể ẩn đề thi lúc này.')
     } finally {
       setDeletingExamId(null)
     }
   }
 
+  async function handlePublishManagedExam(examId: string) {
+    try {
+      setIsSavingManagedDraft(true)
+      await setManagedExamImportState(examId, 'published')
+      closeManagedQuestionEditor()
+      toast.success('Đã xuất bản đề thi.')
+      await loadManagedExams()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Không thể xuất bản đề thi.')
+    } finally {
+      setIsSavingManagedDraft(false)
+    }
+  }
+
   function updateManagedDraftQuestionField(index: number, patch: Partial<AdminImportQuestion>) {
+    setManagedDraftDirty(true)
     setManagedDraft((current) => {
       if (!current) {
         return current
@@ -515,6 +517,7 @@ export function ImportExamPage() {
           questionIndex === index
             ? {
                 ...question,
+                reviewed: false,
                 ...patch,
               }
             : question,
@@ -524,6 +527,7 @@ export function ImportExamPage() {
   }
 
   function updateManagedDraftOption(index: number, label: 'A' | 'B' | 'C' | 'D', text: string) {
+    setManagedDraftDirty(true)
     setManagedDraft((current) => {
       if (!current) {
         return current
@@ -535,6 +539,7 @@ export function ImportExamPage() {
           questionIndex === index
             ? {
                 ...question,
+                reviewed: false,
                 options: question.options.map((option) =>
                   option.label === label ? { ...option, text } : option,
                 ),
@@ -550,6 +555,7 @@ export function ImportExamPage() {
     label: AdminImportStatement['label'],
     text: string,
   ) {
+    setManagedDraftDirty(true)
     setManagedDraft((current) => {
       if (!current) {
         return current
@@ -561,6 +567,7 @@ export function ImportExamPage() {
           questionIndex === index
             ? {
                 ...question,
+                reviewed: false,
                 statements: question.statements.map((statement) =>
                   statement.label === label ? { ...statement, text } : statement,
                 ),
@@ -573,12 +580,13 @@ export function ImportExamPage() {
 
   async function addManagedDraftQuestionAsset(index: number, file: File) {
     if (!file.type.startsWith('image/')) {
-      toast.error('Chi ho tro file anh PNG/JPG/WebP cho asset cau hoi.')
+      toast.error('Chỉ hỗ trợ ảnh PNG, JPG hoặc WebP cho câu hỏi.')
       return
     }
 
     try {
       const dataUrl = await readFileAsDataUrl(file)
+      setManagedDraftDirty(true)
       setManagedDraft((current) => {
         if (!current) {
           return current
@@ -601,6 +609,7 @@ export function ImportExamPage() {
 
             return {
               ...question,
+              reviewed: false,
               assets: [
                 ...question.assets,
                 {
@@ -614,13 +623,14 @@ export function ImportExamPage() {
           }),
         }
       })
-      toast.success('Da them anh vao editor de thi da luu.')
+      toast.success('Đã thêm ảnh vào đề đang chỉnh sửa.')
     } catch {
-      toast.error('Khong doc duoc file anh vua chon.')
+      toast.error('Không đọc được tệp ảnh vừa chọn.')
     }
   }
 
   function removeManagedDraftQuestionAsset(index: number, assetIndex: number) {
+    setManagedDraftDirty(true)
     setManagedDraft((current) => {
       if (!current) {
         return current
@@ -632,6 +642,7 @@ export function ImportExamPage() {
           questionIndex === index
             ? {
                 ...question,
+                reviewed: false,
                 assets: question.assets.filter((_, currentAssetIndex) => currentAssetIndex !== assetIndex),
               }
             : question,
@@ -645,26 +656,19 @@ export function ImportExamPage() {
       return
     }
 
-    const issues = getDraftValidationIssues({
-      draft: managedDraft,
-      pdfFile: new File(['managed-exam'], 'managed-exam.pdf', { type: 'application/pdf' }),
-    }).filter((issue) => issue !== 'Chua co file PDF.')
-
-    if (issues.length > 0) {
-      toast.error(issues[0] ?? 'Du lieu de thi chua hop le de cap nhat.')
-      return
-    }
 
     try {
       setIsSavingManagedDraft(true)
       await saveManagedImportedExamDraft({
         draft: managedDraft,
       })
-      toast.success('Da cap nhat noi dung cau hoi va dap an cua de thi.')
+      setManagedDraft(await fetchManagedImportedExamDraft(managedDraft.examDraft.examId))
+      setManagedDraftDirty(false)
+      toast.success('Đã lưu kết quả duyệt. Hãy sửa các câu còn lỗi trước khi xuất bản.')
       await loadManagedExams()
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Khong the luu noi dung de thi da sua.'
+        error instanceof Error ? error.message : 'Không thể lưu nội dung đề thi đã sửa.'
       toast.error(message)
     } finally {
       setIsSavingManagedDraft(false)
@@ -678,21 +682,21 @@ export function ImportExamPage() {
         <div className="border-b border-slate-200 bg-[linear-gradient(135deg,#0f172a_0%,#1f2937_52%,#111827_100%)] px-6 py-7 text-white md:px-8">
           <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-100/90">
             <ShieldCheck className="h-3.5 w-3.5" strokeWidth={1.8} />
-            Teacher PDF Import
+            Nhập đề thi từ PDF
           </div>
           <div className="mt-5 grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
             <div>
               <h1 className="max-w-[14ch] text-4xl font-extrabold tracking-[-0.04em] text-white md:text-5xl">
-                Nap de bang PDF, con lai de AI xu ly.
+                Tải đề thi lên để AI phân tích.
               </h1>
               <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
-                Giao vien chi can upload PDF, chon mon, nhap truong/thanh pho/nam/ma de va dien dap an theo 3 phan. He thong se tu gan thoi luong theo mon, trich xuat cau hoi, map dap an, tao preview va luu vao Supabase.
+                Giáo viên tải PDF lên, chọn môn, nhập thông tin đề thi và điền đáp án cho ba phần. Hệ thống tự đặt thời lượng theo môn, trích xuất câu hỏi, ghép đáp án và tạo bản xem trước để giáo viên kiểm tra trước khi lưu.
               </p>
             </div>
             <div className="grid gap-3 rounded-[28px] border border-white/10 bg-white/5 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-              <StatusPill label="Nguoi thao tac" value={user?.fullName || user?.email || 'Teacher'} />
-              <StatusPill label="Role" value={user?.role || 'teacher'} />
-              <StatusPill label="Thoi luong mac dinh" value={`${metadata.durationMinutes} phut`} />
+              <StatusPill label="Người thao tác" value={user?.fullName || user?.email || 'Giáo viên'} />
+              <StatusPill label="Vai trò" value={user?.role === 'admin' ? 'Quản trị viên' : 'Giáo viên'} />
+              <StatusPill label="Thời lượng mặc định" value={`${metadata.durationMinutes} phút`} />
             </div>
           </div>
         </div>
@@ -700,33 +704,33 @@ export function ImportExamPage() {
         <div className="grid gap-6 px-6 py-6 xl:grid-cols-[0.9fr_1.1fr]">
           <section className="space-y-5">
             <SectionHeading
-              title="Thong tin toi thieu"
-              description="Thoi luong duoc tu dong gan theo mon hoc. Exam ID van duoc sinh noi bo tu truong, mon, nam thi va ma de."
+              title="Thông tin bắt buộc"
+              description="Thời lượng được đặt tự động theo môn học. Mã định danh đề được tạo từ tên trường, môn, năm thi và mã đề."
             />
 
             <div className="grid gap-4 md:grid-cols-2">
               <SubjectField value={metadata.subjectCode} onChange={updateSubject} />
               <InputField
-                label="Ten truong"
+                label="Tên trường"
                 onChange={(value) => updateMetadataField('schoolName', value)}
                 placeholder="THPT Văn Lang"
                 value={metadata.schoolName}
               />
               <InputField
-                label="Thanh pho"
+                label="Thành phố"
                 onChange={(value) => updateMetadataField('city', value)}
                 placeholder="Hà Nội"
                 value={metadata.city}
               />
               <InputField
-                label="Nam thi"
+                label="Năm thi"
                 onChange={(value) => updateMetadataField('year', value)}
                 placeholder="2026"
                 type="number"
                 value={metadata.year}
               />
               <InputField
-                label="Ma de"
+                label="Mã đề"
                 onChange={(value) => updateMetadataField('variantCode', value)}
                 placeholder="101"
                 value={metadata.variantCode}
@@ -735,12 +739,12 @@ export function ImportExamPage() {
 
             <div className="rounded-[26px] border border-slate-200 bg-white p-4 shadow-[0_14px_42px_rgba(15,23,42,0.04)]">
               <div className="mb-2 block text-sm font-semibold text-slate-900">
-                Dap an giao vien nhap
+                Đáp án do giáo viên nhập
               </div>
               <div className="space-y-4">
                 <AnswerKeySection
-                  description="Phan I. Trac nghiem nhieu lua chon"
-                  title="Phan I"
+                  description="Phần I. Trắc nghiệm nhiều lựa chọn"
+                  title="Phần I"
                 >
                   <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6">
                     {buildNumberRange(1, partOneQuestionCount).map((questionNumber) => (
@@ -761,8 +765,8 @@ export function ImportExamPage() {
                 </AnswerKeySection>
 
                 <AnswerKeySection
-                  description="Phan II. Dung / Sai"
-                  title="Phan II"
+                  description="Phần II. Đúng / Sai"
+                  title="Phần II"
                 >
                   <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                     {buildNumberRange(1, PART_TWO_COUNT).map((questionNumber) => (
@@ -785,8 +789,8 @@ export function ImportExamPage() {
                 </AnswerKeySection>
 
                 <AnswerKeySection
-                  description="Phan III. Tra loi ngan"
-                  title="Phan III"
+                  description="Phần III. Trả lời ngắn"
+                  title="Phần III"
                 >
                   <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                     {buildNumberRange(1, PART_THREE_COUNT).map((questionNumber) => (
@@ -808,15 +812,15 @@ export function ImportExamPage() {
                 </AnswerKeySection>
               </div>
               <p className="mt-2 text-xs leading-5 text-slate-500">
-                {buildAnswerKeyHint(partOneQuestionCount, PART_TWO_COUNT, PART_THREE_COUNT)} Neu thieu dap an, preview se canh bao de giao vien sua.
+                {buildAnswerKeyHint(partOneQuestionCount, PART_TWO_COUNT, PART_THREE_COUNT)} Nếu thiếu đáp án, bản xem trước sẽ cảnh báo để giáo viên bổ sung.
               </p>
             </div>
           </section>
 
           <section className="space-y-5">
             <SectionHeading
-              title="Upload PDF de thi"
-              description="Workflow chinh chi nhan PDF. Backend se gui PDF cho Gemini 2.5 Flash de doc va boc tach cau hoi."
+              title="Tải PDF đề thi lên"
+              description="Hệ thống chỉ nhận tệp PDF và dùng Gemini 2.5 Flash để trích xuất câu hỏi."
             />
 
             <div
@@ -847,10 +851,10 @@ export function ImportExamPage() {
                   </div>
                   <div>
                     <div className="text-xl font-semibold text-slate-900">
-                      Keo tha PDF vao day
+                      Kéo thả PDF vào đây
                     </div>
                     <p className="mt-1 max-w-md text-sm leading-6 text-slate-500">
-                      File PDF goc se duoc upload vao Supabase Storage khi bam luu CSDL.
+                      Tệp PDF gốc sẽ được tải lên Supabase Storage khi lưu bản nháp.
                     </p>
                   </div>
                 </div>
@@ -861,7 +865,7 @@ export function ImportExamPage() {
                   type="button"
                 >
                   <FileText className="h-4 w-4" strokeWidth={1.8} />
-                  Chon PDF
+                  Chọn PDF
                 </button>
               </div>
 
@@ -907,12 +911,12 @@ export function ImportExamPage() {
                 ) : (
                   <Sparkles className="h-4 w-4" strokeWidth={1.8} />
                 )}
-                Phan tich PDF bang AI
+                Phân tích PDF bằng AI
               </button>
 
               <button
                 className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 active:translate-y-px"
-                disabled={isSaving || !result}
+                disabled={isSaving || isValidating || !result?.questions.length}
                 onClick={() => void handleSave()}
                 type="button"
               >
@@ -921,9 +925,26 @@ export function ImportExamPage() {
                 ) : (
                   <Save className="h-4 w-4" strokeWidth={1.8} />
                 )}
-                Luu vao CSDL
+                Lưu bản nháp chờ duyệt
               </button>
             </div>
+
+            {importReport ? (
+              <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950" role="status">
+                Đã lưu bản nháp: {importReport.questionCount - importReport.flaggedCount} câu hợp lệ, {importReport.warningCount} cảnh báo, {importReport.flaggedCount} câu cần sửa.
+                <button
+                  className="ml-2 font-semibold underline"
+                  onClick={() => {
+                    const exam = managedExams.find((item) => item.examId === importReport.examId)
+                    if (exam) void openManagedQuestionEditor(exam)
+                  }}
+                  disabled={!managedExams.some((exam) => exam.examId === importReport.examId)}
+                  type="button"
+                >
+                  Mở đề để duyệt
+                </button>
+              </div>
+            ) : null}
 
             {isValidating && validationStatus ? (
               <div className="rounded-[24px] border border-sky-200 bg-sky-50 px-4 py-4 text-sm leading-6 text-sky-800">
@@ -932,12 +953,17 @@ export function ImportExamPage() {
                   {validationStatus}
                 </div>
                 <p className="mt-2 text-xs leading-5 text-sky-700">
-                  PDF co text thuong nhanh hon. PDF scan/anh co the cham vi backend phai fallback sang Gemini File API.
+                  PDF có văn bản thường được xử lý nhanh hơn. PDF dạng ảnh hoặc bản quét có thể mất nhiều thời gian hơn để nhận dạng chữ.
                 </p>
               </div>
             ) : null}
 
-            {apiError ? <InlineAlert message={apiError} title="Khong the phan tich PDF" /> : null}
+            {importError ? (
+              <InlineAlert
+                message={importError.message}
+                title={importError.stage === 'save' ? 'Không thể lưu đề thi' : 'Không thể phân tích PDF'}
+              />
+            ) : null}
 
             <ManagedExamPanel
               deletingExamId={deletingExamId}
@@ -946,7 +972,7 @@ export function ImportExamPage() {
               form={managedForm}
               isLoading={isLoadingManagedExams}
               isSaving={isUpdatingManagedExam}
-              onDelete={handleDeleteManagedExam}
+              onDelete={handleArchiveManagedExam}
               onEdit={startEditingManagedExam}
               onEditQuestions={openManagedQuestionEditor}
               onFormChange={updateManagedFormField}
@@ -964,13 +990,13 @@ export function ImportExamPage() {
           <div className="flex flex-col gap-3 border-b border-slate-200 pb-5 md:flex-row md:items-end md:justify-between">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                Managed Exam Editor
+                Chỉnh sửa đề đã nhập
               </div>
               <h2 className="mt-2 text-3xl font-extrabold tracking-[-0.04em] text-slate-950">
-                Sua de da luu trong he thong
+                Sửa đề đã lưu trong hệ thống
               </h2>
               <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-600">
-                Editor nay mo toan bo cau hoi cua de thi da luu, cho phep sua noi dung, dap an, topic va hinh anh giong preview sau khi AI phan tich.
+                Bạn có thể sửa nội dung, đáp án, chuyên đề và hình ảnh của từng câu hỏi như trong bản xem trước.
               </p>
             </div>
 
@@ -981,14 +1007,26 @@ export function ImportExamPage() {
                 onClick={() => void handleSaveManagedDraft()}
                 type="button"
               >
-                {isSavingManagedDraft ? 'Dang luu...' : 'Luu noi dung de'}
+                {isSavingManagedDraft ? 'Đang lưu...' : 'Lưu kết quả duyệt'}
               </button>
+              {managedDraft && managedExams.some((exam) => exam.examId === editingQuestionExamId && exam.importState && !exam.isActive) ? (
+                <button
+                  className="rounded-2xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  disabled={isSavingManagedDraft || managedDraftDirty || !managedDraft.questions.length ||
+                    managedDraft.questions.some((question) => !question.reviewed || getQuestionValidationIssues(question).length > 0)}
+                  onClick={() => void handlePublishManagedExam(managedDraft.examDraft.examId)}
+                  type="button"
+                >
+                  Xuất bản đề thi
+                </button>
+              ) : null}
               <button
                 className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                disabled={isSavingManagedDraft}
                 onClick={closeManagedQuestionEditor}
                 type="button"
               >
-                Dong editor
+                Đóng trình chỉnh sửa
               </button>
             </div>
           </div>
@@ -1004,7 +1042,7 @@ export function ImportExamPage() {
                   pdfFile: new File(['managed-exam'], 'managed-exam.pdf', {
                     type: 'application/pdf',
                   }),
-                }).filter((issue) => issue !== 'Chua co file PDF.')}
+                }).filter((issue) => issue !== 'Chưa có tệp PDF.')}
                 removeQuestionAsset={removeManagedDraftQuestionAsset}
                 result={managedDraft}
                 subjectCode={managedDraft.examDraft.subjectCode}
@@ -1021,20 +1059,20 @@ export function ImportExamPage() {
         <div className="flex flex-col gap-3 border-b border-slate-200 pb-5 md:flex-row md:items-end md:justify-between">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Preview editor
+              Bản xem trước
             </div>
             <h2 className="mt-2 text-3xl font-extrabold tracking-[-0.04em] text-slate-950">
-              Kiem tra va sua truoc khi luu
+              Kiểm tra và sửa trước khi lưu
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-600">
-              Preview ho tro 3 phan: trac nghiem A-D, dung/sai DDSS va tra loi ngan.
+              Bản xem trước hỗ trợ ba phần: trắc nghiệm A–D, đúng/sai (DDSS) và trả lời ngắn.
             </p>
           </div>
 
           {result ? (
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700">
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-              {result.questions.length} cau hoi
+              {result.questions.length} câu hỏi
             </div>
           ) : null}
         </div>
@@ -1082,11 +1120,11 @@ function PreviewEditor({
   return (
     <div className="space-y-5">
       {result.warnings.length > 0 ? (
-        <WarningBlock items={result.warnings} title="Canh bao tong the" tone="warning" />
+        <WarningBlock items={result.warnings} title="Cảnh báo chung" tone="warning" />
       ) : null}
 
       {draftIssues.length > 0 ? (
-        <WarningBlock items={draftIssues} title="Chua san sang luu" tone="danger" />
+        <WarningBlock items={draftIssues} title="Cần sửa trước khi xuất bản" tone="danger" />
       ) : null}
 
       {result.questions.map((question, index) => {
@@ -1103,24 +1141,24 @@ function PreviewEditor({
             <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  {questionSectionLabel} - Cau {localizedQuestionNumber}
+                  {questionSectionLabel} - Câu {localizedQuestionNumber}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Badge tone={isQuestionReady ? 'success' : 'danger'}>
-                    {isQuestionReady ? 'Hop le' : 'Can sua'}
+                    {isQuestionReady ? (question.reviewed ? 'Đã duyệt' : 'Hợp lệ') : 'Cần sửa'}
                   </Badge>
                   <Badge tone="neutral">{formatQuestionType(question.questionType)}</Badge>
-                  {question.assets.length > 0 ? <Badge tone="neutral">Co hinh</Badge> : null}
+                  {question.assets.length > 0 ? <Badge tone="neutral">Có hình</Badge> : null}
                   {question.warnings.length > 0 ? (
-                    <Badge tone="warning">{question.warnings.length} warning</Badge>
+                    <Badge tone="warning">{question.warnings.length} cảnh báo</Badge>
                   ) : null}
                 </div>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <InputField
+                {!question.persistedId ? <InputField
                   compact
-                  label="So cau trong phan"
+                  label="Số câu trong phần"
                   onChange={(value) =>
                     updateQuestionField(index, {
                       questionNumber: toGlobalQuestionNumber(
@@ -1131,19 +1169,44 @@ function PreviewEditor({
                   }
                   type="number"
                   value={String(localizedQuestionNumber)}
-                />
+                /> : null}
+                <label className="block text-sm font-semibold text-slate-900">
+                  Mức độ (1–4)
+                  <select
+                    className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3"
+                    onChange={(event) => updateQuestionField(index, { difficultyLevel: Number(event.target.value) || null })}
+                    value={question.difficultyLevel ?? ''}
+                  >
+                    <option value="">Chọn mức độ</option>
+                    <option value="1">1 — Nhận biết</option>
+                    <option value="2">2 — Thông hiểu</option>
+                    <option value="3">3 — Vận dụng</option>
+                    <option value="4">4 — Vận dụng cao</option>
+                  </select>
+                </label>
                 <AnswerField
                   onChange={(value) =>
                     updateQuestionField(index, {
-                      correctAnswer: value.toUpperCase(),
+                    correctAnswer: question.questionType === 'short_answer' ? value : value.toUpperCase(),
                     })
                   }
                   question={question}
                 />
+                {question.persistedId ? (
+                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <input
+                      checked={Boolean(question.reviewed)}
+                      disabled={!isQuestionReady}
+                      onChange={(event) => updateQuestionField(index, { reviewed: event.target.checked })}
+                      type="checkbox"
+                    />
+                    Xác nhận đã duyệt câu này
+                  </label>
+                ) : null}
               </div>
 
               <label className="mt-3 block">
-                <div className="mb-2 text-sm font-semibold text-slate-900">Topic / Chuyen de</div>
+                <div className="mb-2 text-sm font-semibold text-slate-900">Chuyên đề</div>
                 <input
                   autoCapitalize="off"
                   autoCorrect="off"
@@ -1154,7 +1217,7 @@ function PreviewEditor({
                       topic: event.target.value,
                     })
                   }
-                  placeholder="AI se goi y topic, giao vien co the sua tay"
+                  placeholder="AI gợi ý chuyên đề, giáo viên có thể chỉnh sửa"
                   spellCheck={false}
                   type="text"
                   value={question.topic}
@@ -1165,7 +1228,7 @@ function PreviewEditor({
             <div className="mt-5 grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
               <div className="space-y-4">
                 <label className="block">
-                  <div className="mb-2 text-sm font-semibold text-slate-900">De bai</div>
+                  <div className="mb-2 text-sm font-semibold text-slate-900">Đề bài</div>
                   <textarea
                     autoCapitalize="off"
                     autoCorrect="off"
@@ -1188,7 +1251,7 @@ function PreviewEditor({
                         key={option.label}
                       >
                         <div className="mb-2 text-sm font-semibold text-slate-900">
-                          Dap an {option.label}
+                          Đáp án {option.label}
                         </div>
                         <textarea
                           autoCapitalize="off"
@@ -1211,7 +1274,7 @@ function PreviewEditor({
                         key={statement.label}
                       >
                         <div className="mb-2 text-sm font-semibold text-slate-900">
-                          Menh de {statement.label}
+                          Mệnh đề {statement.label}
                         </div>
                         <textarea
                           autoCapitalize="off"
@@ -1231,15 +1294,15 @@ function PreviewEditor({
 
               <div className="space-y-4">
                 {clientIssues.length > 0 ? (
-                  <WarningBlock items={clientIssues} title="Loi can sua" tone="danger" />
+                  <WarningBlock items={clientIssues} title="Lỗi cần sửa" tone="danger" />
                 ) : (
                   <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm leading-6 text-emerald-800">
-                    Cau nay da hop le de luu.
+                    Câu này hợp lệ và có thể lưu.
                   </div>
                 )}
 
                 {question.warnings.length > 0 ? (
-                  <WarningBlock items={question.warnings} title="AI warnings" tone="warning" />
+                  <WarningBlock items={question.warnings} title="Cảnh báo từ AI" tone="warning" />
                 ) : null}
 
                 <QuestionAssetEditor
@@ -1252,7 +1315,7 @@ function PreviewEditor({
 
                 {question.changes.length > 0 ? (
                   <div className="rounded-[24px] border border-slate-200 bg-white px-4 py-4">
-                    <div className="text-sm font-semibold text-slate-900">AI da sua</div>
+                    <div className="text-sm font-semibold text-slate-900">Nội dung AI đã sửa</div>
                     <div className="mt-3 space-y-3">
                       {question.changes.map((change, changeIndex) => (
                         <div
@@ -1263,15 +1326,15 @@ function PreviewEditor({
                             {change.field}
                           </div>
                           <div className="mt-2 text-sm text-slate-600">
-                            <span className="font-semibold text-slate-800">Goc:</span>{' '}
+                            <span className="font-semibold text-slate-800">Gốc:</span>{' '}
                             {change.original || '--'}
                           </div>
                           <div className="mt-1 text-sm text-slate-600">
-                            <span className="font-semibold text-slate-800">Sua:</span>{' '}
+                            <span className="font-semibold text-slate-800">Đã sửa:</span>{' '}
                             {change.corrected || '--'}
                           </div>
                           <div className="mt-1 text-sm text-slate-600">
-                            <span className="font-semibold text-slate-800">Ly do:</span>{' '}
+                            <span className="font-semibold text-slate-800">Lý do:</span>{' '}
                             {change.reason || '--'}
                           </div>
                         </div>
@@ -1326,9 +1389,9 @@ function ManagedExamPanel({
     <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_14px_42px_rgba(15,23,42,0.04)]">
       <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <div className="text-sm font-semibold text-slate-900">Quan ly de da nhap</div>
+          <div className="text-sm font-semibold text-slate-900">Quản lý đề đã nhập</div>
           <div className="mt-1 text-sm leading-6 text-slate-500">
-            Sua metadata co ban, bat/tat hien thi va xoa de thi ngay tai man nay.
+            Chỉnh sửa thông tin, xuất bản, ẩn hoặc hoàn tác nhập đề.
           </div>
         </div>
         <button
@@ -1336,11 +1399,11 @@ function ManagedExamPanel({
           onClick={onRefresh}
           type="button"
         >
-          Tai lai danh sach
+          Tải lại danh sách
         </button>
       </div>
 
-      {panelError ? <InlineAlert message={panelError} title="Khong the tai danh sach de" /> : null}
+      {panelError ? <InlineAlert message={panelError} title="Không thể tải danh sách đề" /> : null}
 
       {isLoading ? (
         <div className="mt-4 space-y-3">
@@ -1356,7 +1419,7 @@ function ManagedExamPanel({
 
       {!isLoading && exams.length === 0 ? (
         <div className="mt-4 rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm leading-6 text-slate-500">
-          Chua co de nao duoc luu tu man import nay.
+          Chưa có đề nào được lưu từ trang này.
         </div>
       ) : null}
 
@@ -1374,11 +1437,11 @@ function ManagedExamPanel({
                   <div className="min-w-0">
                     <div className="text-base font-semibold text-slate-950">{exam.title}</div>
                     <div className="mt-1 text-sm leading-6 text-slate-600">
-                      {exam.schoolName} | {exam.subjectName} | {exam.year} | Ma {exam.variantCode || '--'}
+                      {exam.schoolName} | {exam.subjectName} | {exam.year} | Mã {exam.variantCode || '--'}
                     </div>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <Badge tone={exam.isActive ? 'success' : 'warning'}>
-                        {exam.isActive ? 'Dang hien' : 'Dang an'}
+                        {exam.importState === 'pending_review' ? 'Chờ duyệt' : exam.importState === 'undone' ? 'Đã hoàn tác nhập' : exam.isActive ? 'Đã xuất bản' : 'Đang ẩn'}
                       </Badge>
                       <Badge tone="neutral">{exam.examId}</Badge>
                     </div>
@@ -1391,29 +1454,30 @@ function ManagedExamPanel({
                       rel="noreferrer"
                       target="_blank"
                     >
-                      Mo PDF
+                      Mở PDF
                     </a>
                     <button
                       className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
                       onClick={() => onEdit(exam)}
                       type="button"
                     >
-                      Sua thong tin
+                      Sửa thông tin
                     </button>
                     <button
                       className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                      disabled={exam.importState === 'published'}
                       onClick={() => void onEditQuestions(exam)}
                       type="button"
                     >
-                      Sua cau hoi
+                      {exam.importState === 'published' ? 'Ẩn đề để sửa' : 'Duyệt / sửa câu hỏi'}
                     </button>
                     <button
                       className="inline-flex items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={deletingExamId === exam.examId}
+                      disabled={deletingExamId === exam.examId || exam.importState === 'undone' || exam.importState === 'unpublished'}
                       onClick={() => void onDelete(exam)}
                       type="button"
                     >
-                      {deletingExamId === exam.examId ? 'Dang xoa...' : 'Xoa de thi'}
+                      {deletingExamId === exam.examId ? 'Đang ẩn...' : 'Hoàn tác / ẩn đề'}
                     </button>
                   </div>
                 </div>
@@ -1423,7 +1487,7 @@ function ManagedExamPanel({
                     <div className="grid gap-4 md:grid-cols-2">
                       <InputField
                         compact
-                        label="Tieu de de thi"
+                        label="Tiêu đề đề thi"
                         onChange={(value) => onFormChange('title', value)}
                         value={form.title}
                       />
@@ -1434,38 +1498,38 @@ function ManagedExamPanel({
                       />
                       <InputField
                         compact
-                        label="Ten truong"
+                        label="Tên trường"
                         onChange={(value) => onFormChange('schoolName', value)}
                         value={form.schoolName}
                       />
                       <InputField
                         compact
-                        label="Thanh pho"
+                        label="Thành phố"
                         onChange={(value) => onFormChange('city', value)}
                         value={form.city}
                       />
                       <InputField
                         compact
-                        label="Nam thi"
+                        label="Năm thi"
                         onChange={(value) => onFormChange('year', value)}
                         type="number"
                         value={form.year}
                       />
                       <InputField
                         compact
-                        label="Thoi luong"
+                        label="Thời lượng"
                         onChange={(value) => onFormChange('durationMinutes', value)}
                         type="number"
                         value={form.durationMinutes}
                       />
                       <InputField
                         compact
-                        label="Ma de"
+                        label="Mã đề"
                         onChange={(value) => onFormChange('variantCode', value)}
                         value={form.variantCode}
                       />
                       <label className="block">
-                        <div className="mb-2 text-sm font-semibold text-slate-900">Trang thai</div>
+                        <div className="mb-2 text-sm font-semibold text-slate-900">Trạng thái</div>
                         <button
                           className={[
                             'h-12 w-full rounded-[20px] border px-4 text-sm font-semibold transition',
@@ -1473,10 +1537,11 @@ function ManagedExamPanel({
                               ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                               : 'border-amber-200 bg-amber-50 text-amber-700',
                           ].join(' ')}
+                          disabled={Boolean(exam.importState)}
                           onClick={() => onFormChange('isActive', !form.isActive)}
                           type="button"
                         >
-                          {form.isActive ? 'Dang hien cho hoc sinh' : 'Dang an khoi hoc sinh'}
+                          {form.isActive ? 'Đang hiển thị cho học sinh' : 'Đang ẩn khỏi học sinh'}
                         </button>
                       </label>
                     </div>
@@ -1488,14 +1553,14 @@ function ManagedExamPanel({
                         onClick={onSave}
                         type="button"
                       >
-                        {isSaving ? 'Dang luu...' : 'Luu thay doi'}
+                        {isSaving ? 'Đang lưu...' : 'Lưu thay đổi'}
                       </button>
                       <button
                         className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
                         onClick={onStopEditing}
                         type="button"
                       >
-                        Huy
+                        Hủy
                       </button>
                     </div>
                   </div>
@@ -1567,7 +1632,7 @@ function AnswerChoiceField({
   return (
     <label className="rounded-[18px] border border-slate-200 bg-white px-3 py-3">
       <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-        Cau {questionNumber}
+        Câu {questionNumber}
       </div>
       <select
         className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 text-sm font-semibold text-slate-800 outline-none transition focus:border-emerald-300 focus:bg-white"
@@ -1600,7 +1665,7 @@ function AnswerTextField({
   return (
     <label className="rounded-[18px] border border-slate-200 bg-white px-3 py-3">
       <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-        Cau {questionNumber}
+        Câu {questionNumber}
       </div>
       <input
         autoCapitalize="off"
@@ -1663,7 +1728,7 @@ function SubjectField({
 }) {
   return (
     <label className="block">
-      <div className="mb-2 text-sm font-semibold text-slate-900">Mon hoc</div>
+      <div className="mb-2 text-sm font-semibold text-slate-900">Môn học</div>
       <select
         className={[
           'w-full rounded-[20px] border border-slate-200 bg-white px-4 text-sm text-slate-800 outline-none transition focus:border-emerald-300',
@@ -1753,7 +1818,7 @@ function buildAnswerKeyHint(partOneCount: number, partTwoCount: number, partThre
   const partTwoEnd = partOneCount + partTwoCount
   const partThreeStart = partTwoEnd + 1
   const partThreeEnd = partTwoEnd + partThreeCount
-  return `He thong tu map thanh chuoi dap an noi bo theo so cau 1-${partOneCount}, ${partTwoStart}-${partTwoEnd} va ${partThreeStart}-${partThreeEnd}.`
+  return `Hệ thống tự ghép đáp án theo số câu 1–${partOneCount}, ${partTwoStart}–${partTwoEnd} và ${partThreeStart}–${partThreeEnd}.`
 }
 
 function AnswerField({
@@ -1766,13 +1831,13 @@ function AnswerField({
   if (question.questionType === 'multiple_choice') {
     return (
       <label className="block">
-        <div className="mb-2 text-sm font-semibold text-slate-900">Dap an dung</div>
+        <div className="mb-2 text-sm font-semibold text-slate-900">Đáp án đúng</div>
         <select
           className="h-12 w-full rounded-[20px] border border-slate-200 bg-white px-4 text-sm text-slate-800 outline-none transition focus:border-emerald-300"
           onChange={(event) => onChange(event.target.value)}
           value={question.correctAnswer}
         >
-          <option value="">Chon</option>
+          <option value="">Chọn</option>
           <option value="A">A</option>
           <option value="B">B</option>
           <option value="C">C</option>
@@ -1785,7 +1850,7 @@ function AnswerField({
   return (
     <InputField
       compact
-      label={question.questionType === 'true_false' ? 'Dap an DDSS' : 'Dap an ngan'}
+      label={question.questionType === 'true_false' ? 'Đáp án DDSS' : 'Đáp án ngắn'}
       onChange={onChange}
       placeholder={question.questionType === 'true_false' ? 'DDSS' : '68'}
       value={question.correctAnswer}
@@ -1812,16 +1877,16 @@ function QuestionAssetEditor({
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
             <ImageIcon className="h-4 w-4" strokeWidth={1.8} />
-            Anh cua cau hoi
+            Ảnh của câu hỏi
           </div>
           <p className="mt-1 text-xs leading-5 text-slate-500">
-            Neu cau co hinh, crop anh tu PDF roi tai len tai day. Anh se duoc luu vao Storage va gan voi {questionSectionLabel.toLowerCase()} cau {questionNumber}.
+            Cắt ảnh từ PDF rồi tải lên đây. Ảnh sẽ được lưu cùng {questionSectionLabel.toLowerCase()} câu {questionNumber}.
           </p>
         </div>
 
         <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-white">
           <Upload className="h-4 w-4" strokeWidth={1.8} />
-          Them anh
+          Thêm ảnh
           <input
             accept="image/png,image/jpeg,image/webp"
             className="hidden"
@@ -1846,23 +1911,23 @@ function QuestionAssetEditor({
             >
               {asset.assetDataUrl || asset.publicUrl ? (
                 <img
-                  alt={`${questionSectionLabel} cau ${questionNumber} asset ${assetIndex + 1}`}
+                  alt={`${questionSectionLabel} câu ${questionNumber}, ảnh ${assetIndex + 1}`}
                   className="max-h-80 w-full rounded-[16px] object-contain"
                   src={asset.assetDataUrl || asset.publicUrl}
                 />
               ) : (
-                <div className="text-sm text-slate-500">Chua co anh preview.</div>
+                <div className="text-sm text-slate-500">Chưa có ảnh xem trước.</div>
               )}
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                 <div className="text-xs text-slate-500">
-                  {asset.assetType} {asset.pageNumber ? `- trang ${asset.pageNumber}` : '- upload thu cong'}
+                  {asset.assetType} {asset.pageNumber ? `- trang ${asset.pageNumber}` : '- tải lên thủ công'}
                 </div>
                 <button
                   className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
                   onClick={() => onRemoveAsset(assetIndex)}
                   type="button"
                 >
-                  Xoa anh
+                  Xóa ảnh
                 </button>
               </div>
             </div>
@@ -1870,7 +1935,7 @@ function QuestionAssetEditor({
         </div>
       ) : (
         <div className="mt-4 rounded-[18px] border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm leading-6 text-slate-500">
-          Chua co anh nao cho cau nay.
+          Chưa có ảnh nào cho câu này.
         </div>
       )}
     </div>
@@ -1964,9 +2029,9 @@ function EmptyPreviewState() {
         <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50">
           <Sparkles className="h-5 w-5 text-slate-500" strokeWidth={1.8} />
         </div>
-        <div className="mt-4 text-lg font-semibold text-slate-900">Chua co preview</div>
+        <div className="mt-4 text-lg font-semibold text-slate-900">Chưa có bản xem trước</div>
         <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">
-          Upload PDF, nhap metadata va answer key, sau do bam phan tich PDF bang AI.
+          Tải PDF lên, nhập thông tin đề thi và đáp án, rồi chọn Phân tích PDF bằng AI.
         </p>
       </div>
     </div>
@@ -1993,22 +2058,22 @@ function PreviewSkeleton() {
 
 function formatQuestionType(questionType: AdminImportQuestion['questionType']) {
   if (questionType === 'multiple_choice') {
-    return 'Trac nghiem'
+    return 'Trắc nghiệm'
   }
   if (questionType === 'true_false') {
-    return 'Dung sai'
+    return 'Đúng/sai'
   }
-  return 'Tra loi ngan'
+  return 'Trả lời ngắn'
 }
 
 function formatQuestionSectionLabel(questionType: AdminImportQuestion['questionType']) {
   if (questionType === 'multiple_choice') {
-    return 'Phan I'
+    return 'Phần I'
   }
   if (questionType === 'true_false') {
-    return 'Phan II'
+    return 'Phần II'
   }
-  return 'Phan III'
+  return 'Phần III'
 }
 
 function toLocalizedQuestionNumber(
@@ -2048,9 +2113,9 @@ function readFileAsDataUrl(file: File) {
         resolve(reader.result)
         return
       }
-      reject(new Error('Invalid file reader result.'))
+      reject(new Error('Dữ liệu tệp không hợp lệ.'))
     }
-    reader.onerror = () => reject(reader.error ?? new Error('Cannot read file.'))
+    reader.onerror = () => reject(reader.error ?? new Error('Không đọc được tệp.'))
     reader.readAsDataURL(file)
   })
 }

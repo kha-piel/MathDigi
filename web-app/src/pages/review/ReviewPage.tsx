@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { setTutorContext, clearTutorContext } from '../../features/tutor-chat/store'
+import { tutorQuestionOptions } from '../../features/tutor-chat/question-context'
 import { Link, useParams } from 'react-router-dom'
 import { MarkdownContent } from '../../components/ui/MarkdownContent'
 import { PageCard } from '../../components/ui/PageCard'
@@ -234,6 +236,7 @@ function ReviewSummaryBody({
   topicLabel: string
 }) {
   const [weaknessAnalysis, setWeaknessAnalysis] = useState('')
+  const [tutorQuestionId, setTutorQuestionId] = useState<string | null>(null)
   const [recommendedTopics, setRecommendedTopics] = useState<KnowledgeReviewTopic[]>([])
   const [analysisError, setAnalysisError] = useState('')
   const [isAnalyzing, setIsAnalyzing] = useState(false)
@@ -255,6 +258,19 @@ function ReviewSummaryBody({
       }, {}),
     [questionBank],
   )
+
+  useEffect(() => {
+    const selectedIndex = summary.reviewItems.findIndex((item) => item.questionId === tutorQuestionId)
+    const index = selectedIndex < 0 ? 0 : selectedIndex
+    const item = summary.reviewItems[index]
+    if (item) {
+      const question = questionMap[item.questionId]
+      setTutorContext({ question_number: index + 1, question_content: item.questionContent, options: question ? tutorQuestionOptions(question) : undefined, question_type: question?.questionType, topic: sessionTopicName, student_answer: item.selectedAnswerText, correct_answer: item.correctAnswerText, solution: item.explanation ?? question?.explanation ?? '', source: 'review' })
+    } else {
+      clearTutorContext()
+    }
+    return clearTutorContext
+  }, [summary.reviewItems, tutorQuestionId, questionMap, sessionTopicName])
 
   const flaggedCount = useMemo(() => {
     if (!allowFlagging || !sessionSubjectId || !sessionTopicId) {
@@ -454,7 +470,7 @@ function ReviewSummaryBody({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 max-w-full space-y-6 [overflow-wrap:anywhere]">
       <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)]">
         <button
           disabled={isAnalyzing}
@@ -542,7 +558,7 @@ function ReviewSummaryBody({
           const isFlagged = allowFlagging && sessionSubjectId && sessionTopicId && flaggedItems[`${sessionSubjectId}::${sessionTopicId}::${item.questionId}`]
 
           return (
-            <section key={item.questionId} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <section key={item.questionId} onClick={() => setTutorQuestionId(item.questionId)} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4">
                 <h3 className="text-xl font-bold text-slate-900">Câu {index + 1}</h3>
                 <div className="flex items-center gap-3">
@@ -658,7 +674,7 @@ function ReviewSummaryBody({
                         }
                       }}
                       placeholder="Hỏi thêm AI về câu này..."
-                      className="flex-1 rounded-xl border border-indigo-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-400"
+                      className="min-w-0 flex-1 rounded-xl border border-indigo-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-400"
                       type="text"
                       value={reviewChatInput}
                     />

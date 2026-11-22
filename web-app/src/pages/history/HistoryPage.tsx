@@ -446,8 +446,16 @@ export function HistoryPage() {
                 <article key={answer.questionNumber} className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="font-bold text-slate-950">Câu {answer.questionNumber}</div>
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${answer.isCorrect ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                      {answer.isCorrect ? 'Đúng' : 'Sai'}
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-bold ${
+                        answer.isCorrect
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : answer.skipped
+                            ? 'bg-slate-200 text-slate-700'
+                            : 'bg-rose-100 text-rose-700'
+                      }`}
+                    >
+                      {answer.isCorrect ? 'Đúng' : answer.skipped ? 'Bỏ qua' : 'Sai'}
                     </span>
                   </div>
                   <div className="mt-2 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">

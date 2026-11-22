@@ -3,6 +3,7 @@ import os
 import logging
 import re
 import tempfile
+import time
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -11,15 +12,17 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from auth import current_user, require_admin
+from tutor_chat import create_tutor_router
 
 logging.basicConfig(level=logging.INFO)
 
 try:
-    import fitz
+    import pymupdf as fitz
 except ImportError:  # pragma: no cover - optional until requirements are installed
     fitz = None
 
@@ -44,6 +47,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["Retry-After"],
 )
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -55,8 +59,12 @@ if not GEMINI_API_KEY:
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 MODEL_NAME = "gemini-2.5-flash"
+app.include_router(create_tutor_router(client, MODEL_NAME))
 BASE_VAULT_PATH = Path(__file__).resolve().parent.parent / "docs" / "knowledge-base"
-PDF_TEXT_EXTRACTION_MIN_CHARS = 99999999 # Force Gemini File API for all PDFs to avoid mojibake
+PDF_MAX_BYTES = 20 * 1024 * 1024
+PDF_MAX_PAGES = 30
+PDF_OCR_WAIT_SECONDS = 45
+pdf_client = genai.Client(api_key=GEMINI_API_KEY, http_options=types.HttpOptions(timeout=20_000))
 logger = logging.getLogger("ai_service.admin_import")
 
 IMPORT_TOPIC_OPTIONS_BY_SUBJECT: dict[str, list[str]] = {
@@ -210,6 +218,7 @@ class PdfExamAsset(BaseModel):
 
 
 class PdfExamQuestion(BaseModel):
+    difficulty_level: int | None = Field(default=None, alias="difficultyLevel")
     question_number: int = Field(alias="questionNumber")
     question_type: str = Field(alias="questionType")
     question_text: str = Field(default="", alias="questionText")
@@ -456,9 +465,26 @@ def build_exam_id(school_name: str, subject_code: str, year: int, variant_code: 
 
 
 def parse_answer_key_text(answer_key_text: str) -> dict[int, str]:
-    normalized = (answer_key_text or "").replace("\n", " ")
+    answer_key_text = (answer_key_text or "").strip()
+    markers = list(re.finditer(
+        r"(?:(?:^|(?<=[,;\r\n]))[ \t]*(\d{1,3})[ \t]*[.:=]"
+        r"|(?<=[ \t])(\d{1,3})[ \t]*(?:[:=]|\.(?!\d)))[ \t]*",
+        answer_key_text,
+    ))
+    if markers and markers[0].start() == 0:
+        parsed = {}
+        for index, marker in enumerate(markers):
+            end = markers[index + 1].start() if index + 1 < len(markers) else len(answer_key_text)
+            value = answer_key_text[marker.end():end].strip(" ,;\t\n\r")
+            if value:
+                parsed[int(marker.group(1) or marker.group(2))] = value
+        return parsed
+
+    normalized = answer_key_text.replace("\n", " ")
     pattern = re.compile(
-        r"(?<!\d)(\d{1,3})\s*(?:[.:=\-]|\s)\s*([DdSs]{4}|[A-Da-d]|[^,;\s]+)",
+        r"(?<!\d)(\d{1,3})\s*(?:[.:=\-]|\s)\s*("
+        r"[DdSs]{4}|[A-Da-d]|[+-]?[0-9]+(?:[.,][0-9]+)?"
+        r"(?:\s*\|\s*[+-]?[0-9]+(?:[.,][0-9]+)?)*(?=$|[\s,;])|[^,;\s]+)",
         re.UNICODE,
     )
     answers: dict[int, str] = {}
@@ -565,7 +591,7 @@ def classify_topics_for_questions(
         return TopicBackfillResponse(results=[], warnings=[])
 
     prompt = build_topic_backfill_prompt(subject_code, questions)
-    raw_model_response = generate_pdf_json(prompt)
+    raw_model_response = generate_topic_backfill_json(prompt)
     payload = parse_model_json_payload(raw_model_response)
     raw_results = payload.get("results", [])
     question_ids = {question.question_id for question in questions}
@@ -616,6 +642,7 @@ def build_pdf_exam_prompt(
             {
                 "questionNumber": 1,
                 "questionType": "multiple_choice | true_false | short_answer",
+                "difficultyLevel": 2,
                 "topic": "string",
                 "questionText": "string",
                 "options": [
@@ -670,6 +697,7 @@ QUY TAC BAT BUOC:
 7. Giu tieng Viet UTF-8 chuan.
 8. Cau nao thieu de bai, thieu option/statement, hoac kho doc thi van tra ve nhung them warning.
 9. topic phai la TEN CHUYEN DE GAN NHAT voi cau hoi va uu tien chon CHINH XAC mot gia tri trong danh muc topic duoi day. Neu that su khong xep duoc, de topic = "".
+10. difficultyLevel la 1 (nhan biet), 2 (thong hieu), 3 (van dung) hoac 4 (van dung cao), dua vao kien thuc va cac buoc giai, khong dua vao thu tu cau. Neu khong chac, tra null.
 
 DANH MUC TOPIC HOP LE CHO MON NAY:
 {json.dumps(topic_options, ensure_ascii=False, indent=2)}
@@ -682,23 +710,27 @@ DINH DANG JSON:
 """.strip()
 
 
-def extract_pdf_text(pdf_path: Path) -> str:
+def extract_pdf_text(pdf_path: Path) -> tuple[str, list[int]]:
     if fitz is None:
-        return ""
+        raise HTTPException(status_code=503, detail="Dịch vụ trích xuất PDF chưa sẵn sàng.")
 
     try:
-        document = fitz.open(pdf_path)
-        page_texts: list[str] = []
-        for page_index in range(document.page_count):
-            page = document.load_page(page_index)
-            text = page.get_text("text").strip()
-            if text:
-                page_texts.append(f"--- PAGE {page_index + 1} ---\n{text}")
-        document.close()
-        return "\n\n".join(page_texts).strip()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Cannot extract PDF text with PyMuPDF: %s", exc)
-        return ""
+        with fitz.open(pdf_path) as document:
+            if not document.is_pdf or document.needs_pass or not document.page_count:
+                raise HTTPException(status_code=422, detail="PDF rỗng, bị khóa hoặc không hợp lệ.")
+            if document.page_count > PDF_MAX_PAGES:
+                raise HTTPException(status_code=413, detail=f"PDF vượt quá {PDF_MAX_PAGES} trang.")
+            page_texts = []
+            scanned_pages = []
+            for page_index, page in enumerate(document, start=1):
+                value = page.get_text("text").strip()
+                if any(character.isalnum() for character in value):
+                    page_texts.append(f"--- PAGE {page_index} ---\n{value}")
+                else:
+                    scanned_pages.append(page_index)
+            return "\n\n".join(page_texts), scanned_pages
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Không thể đọc tệp PDF.") from exc
 
 
 def build_pdf_text_exam_prompt(
@@ -727,7 +759,7 @@ Neu text thieu do co hinh/so do/bang thi giu lai phan text doc duoc, them warnin
 """.strip()
 
 
-def generate_pdf_json(contents: Any) -> str:
+def generate_topic_backfill_json(contents: str) -> str:
     try:
         response = client.models.generate_content(
             model=MODEL_NAME,
@@ -737,13 +769,118 @@ def generate_pdf_json(contents: Any) -> str:
                 temperature=0,
             ),
         )
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Loi khi goi Gemini text PDF: {exc}") from exc
+    except Exception as exc:
+        logger.warning(
+            "Gemini topic backfill failed: %s (HTTP %s)",
+            type(exc).__name__,
+            exc.code if isinstance(exc, errors.APIError) else None,
+        )
+        raise gemini_api_key_error(exc) or HTTPException(
+            status_code=502, detail="Dịch vụ AI phân loại chuyên đề hiện không khả dụng. Hãy thử lại sau."
+        ) from exc
 
     text = getattr(response, "text", None)
     if not text:
-        raise HTTPException(status_code=500, detail="Gemini khong tra ve JSON tu PDF text.")
+        raise HTTPException(status_code=502, detail="Gemini không trả về dữ liệu phân loại chuyên đề.")
     return text
+
+
+def gemini_api_key_error(exc: Exception) -> HTTPException | None:
+    if not isinstance(exc, errors.APIError) or not isinstance(exc.details, dict):
+        return None
+    provider_error = exc.details.get("error", exc.details)
+    provider_details = provider_error.get("details") if isinstance(provider_error, dict) else None
+    if isinstance(provider_details, list) and any(
+        isinstance(item, dict) and item.get("reason") == "API_KEY_INVALID" for item in provider_details
+    ):
+        return HTTPException(status_code=502, detail={
+            "code": "AI_PROVIDER_API_KEY_INVALID",
+            "message": "Gemini từ chối khóa API. Hãy liên hệ quản trị viên để kiểm tra cấu hình khóa.",
+        })
+    return None
+
+
+def retry_pdf_request(operation):
+    for attempt in range(3):
+        try:
+            return operation()
+        except Exception as exc:
+            status = getattr(exc, "code", None)
+            key_error = gemini_api_key_error(exc)
+            if key_error is not None:
+                raise key_error from exc
+            transient = status in {408, 429, 500, 502, 503, 504} or isinstance(exc, (TimeoutError, OSError))
+            if transient and attempt < 2:
+                time.sleep(2 ** attempt)
+                continue
+            raise HTTPException(
+                status_code=503 if transient else 502,
+                detail="Dịch vụ AI phân tích PDF hiện không khả dụng. Hãy thử lại sau.",
+            ) from exc
+
+
+def analyze_pdf(pdf_path: Path, pdf_name: str, subject_code: str, subject_name: str, answer_key_map: dict[int, str]) -> str:
+    extracted_text, scanned_pages = extract_pdf_text(pdf_path)
+    if not scanned_pages:
+        prompt = build_pdf_text_exam_prompt(pdf_name, subject_code, subject_name, answer_key_map, extracted_text)
+        return generate_import_json(prompt)
+
+    prompt = build_pdf_exam_prompt(pdf_name, subject_code, subject_name, answer_key_map)
+    if not extracted_text:
+        return analyze_scanned_pdf(pdf_path, prompt + "\nNhan dien chu (OCR) trong PDF scan.")
+
+    page_mapping = ", ".join(f"{index} -> {page}" for index, page in enumerate(scanned_pages, start=1))
+    prompt += f"""
+Dung text trich xuat ben duoi cho cac trang co text. OCR chi cac trang trong PDF dinh kem.
+Gop cau hoi tu hai nguon theo thu tu trang goc. pageNumber phai la so trang goc.
+Bang anh xa trang PDF dinh kem -> trang goc: {page_mapping}
+
+{extracted_text}
+"""
+    with tempfile.TemporaryDirectory() as directory:
+        scan_path = Path(directory) / "scanned-pages.pdf"
+        with fitz.open(pdf_path) as document:
+            document.select([page - 1 for page in scanned_pages])
+            document.save(scan_path)
+        return analyze_scanned_pdf(scan_path, prompt)
+
+
+def analyze_scanned_pdf(pdf_path: Path, prompt: str) -> str:
+    uploaded_file = retry_pdf_request(
+        lambda: pdf_client.files.upload(file=str(pdf_path), config={"mime_type": "application/pdf"})
+    )
+    name = uploaded_file.name
+    deadline = time.monotonic() + PDF_OCR_WAIT_SECONDS
+    try:
+        while uploaded_file.state.name == "PROCESSING":
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise HTTPException(status_code=504, detail="Đã hết thời gian chờ nhận dạng chữ trong PDF.")
+            time.sleep(min(2, remaining))
+            if time.monotonic() >= deadline:
+                raise HTTPException(status_code=504, detail="Đã hết thời gian chờ nhận dạng chữ trong PDF.")
+            uploaded_file = retry_pdf_request(lambda: pdf_client.files.get(name=name))
+            if time.monotonic() >= deadline:
+                raise HTTPException(status_code=504, detail="Đã hết thời gian chờ nhận dạng chữ trong PDF.")
+        if uploaded_file.state.name != "ACTIVE":
+            raise HTTPException(status_code=502, detail="Gemini không thể nhận dạng chữ trong tệp PDF này.")
+        return generate_import_json([uploaded_file, prompt])
+    finally:
+        try:
+            pdf_client.files.delete(name=name)
+        except Exception:
+            logger.warning("Unable to remove temporary OCR file.")
+
+
+def generate_import_json(contents: Any) -> str:
+    response = retry_pdf_request(lambda: pdf_client.models.generate_content(
+        model=MODEL_NAME,
+        contents=contents,
+        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0),
+    ))
+    if not response.text:
+        raise HTTPException(status_code=502, detail="Dịch vụ phân tích không trả về dữ liệu PDF.")
+    return response.text
 
 
 def normalize_pdf_question(
@@ -760,12 +897,12 @@ def normalize_pdf_question(
         question_number = int(question_number_raw)
     except (TypeError, ValueError):
         question_number = fallback_number
-        warnings.append("Khong doc duoc questionNumber, da gan theo thu tu fallback.")
+        warnings.append("Không đọc được số câu hỏi nên đã đánh số theo thứ tự xuất hiện.")
 
     question_type = str(item.get("questionType", item.get("question_type", ""))).strip()
     if question_type not in {"multiple_choice", "true_false", "short_answer"}:
         question_type = "multiple_choice"
-        warnings.append("Khong doc duoc questionType, tam gan multiple_choice.")
+        warnings.append("Không xác định được loại câu hỏi nên tạm xếp vào phần trắc nghiệm nhiều lựa chọn.")
 
     raw_options = item.get("options", [])
     option_map: dict[str, str] = {}
@@ -800,10 +937,11 @@ def normalize_pdf_question(
     has_image = bool(item.get("hasImage", item.get("has_image", False)))
     assets: list[PdfExamAsset] = []
     if has_image:
-        warnings.append("Cau co hinh trong PDF goc. Backend hien chi xu ly text, can giao vien doi chieu neu can.")
+        warnings.append("Câu hỏi có hình trong PDF gốc. Giáo viên nên đối chiếu với hình gốc khi duyệt.")
 
     changes: list[ValidatedExamChange] = []
-    for change in item.get("changes", []):
+    raw_changes = item.get("changes")
+    for change in raw_changes if isinstance(raw_changes, list) else []:
         if isinstance(change, dict):
             changes.append(
                 ValidatedExamChange(
@@ -820,34 +958,42 @@ def normalize_pdf_question(
         subject_code,
     )
 
-    is_valid = True
+    difficulty = item.get("difficultyLevel", item.get("difficulty_level"))
+    if type(difficulty) is not int or difficulty not in {1, 2, 3, 4}:
+        difficulty = None
+        warnings.append("Cần chọn mức độ từ 1 đến 4.")
+    is_valid = difficulty is not None
+    if not topic:
+        is_valid = False
+        warnings.append("Cần chọn chuyên đề cho câu hỏi.")
     if not question_text:
         is_valid = False
-        warnings.append("Thieu de bai.")
+        warnings.append("Thiếu đề bài.")
 
     if question_type == "multiple_choice":
         missing_options = [option.label for option in options if not option.text]
         if missing_options:
             is_valid = False
-            warnings.append(f"Thieu dap an {', '.join(missing_options)}.")
+            warnings.append(f"Thiếu đáp án {', '.join(missing_options)}.")
         if correct_answer.upper() not in {"A", "B", "C", "D"}:
             is_valid = False
-            warnings.append("Thieu hoac sai dap an dung A/B/C/D.")
+            warnings.append("Đáp án đúng A/B/C/D bị thiếu hoặc không hợp lệ.")
         correct_answer = correct_answer.upper()
     elif question_type == "true_false":
         if len(statements) < 4:
             is_valid = False
-            warnings.append("Thieu menh de dung/sai a,b,c,d.")
+            warnings.append("Thiếu mệnh đề đúng/sai a, b, c, d.")
         if not re.fullmatch(r"[DS]{4}", correct_answer.upper()):
             is_valid = False
-            warnings.append("Thieu hoac sai dap an dung/sai dang DDSS.")
+            warnings.append("Đáp án đúng/sai dạng DDSS bị thiếu hoặc không hợp lệ.")
         correct_answer = correct_answer.upper()
     else:
-        if not correct_answer:
+        if not re.fullmatch(r"[+-]?[0-9]+(?:[.,][0-9]+)?(?:\s*\|\s*[+-]?[0-9]+(?:[.,][0-9]+)?)*", correct_answer):
             is_valid = False
-            warnings.append("Thieu dap an tra loi ngan.")
+            warnings.append("Đáp án trả lời ngắn phải là số.")
 
     return PdfExamQuestion(
+        difficulty_level=difficulty,
         question_number=question_number,
         question_type=question_type,
         question_text=question_text,
@@ -883,7 +1029,7 @@ def normalize_pdf_exam_response(
     asset_root_path = f"{subject_code}/{year}/{exam_id}"
     exam_draft = PdfExamDraft(
         exam_id=exam_id,
-        title=f"De thi {subject_name} {school_name} {year} - Ma {variant_code}",
+        title=f"Đề thi {subject_name} {school_name} {year} - Mã {variant_code}",
         school_name=school_name,
         city=city,
         subject_code=subject_code,
@@ -913,7 +1059,7 @@ def normalize_pdf_exam_response(
 
     warnings = normalize_warning_list(payload.get("warnings", []))
     if not questions:
-        warnings.append("Gemini khong trich xuat duoc cau hoi nao tu PDF.")
+        warnings.append("Gemini không trích xuất được câu hỏi nào từ PDF.")
 
     duplicate_numbers = [
         question.question_number
@@ -921,7 +1067,7 @@ def normalize_pdf_exam_response(
         if [item.question_number for item in questions].count(question.question_number) > 1
     ]
     if duplicate_numbers:
-        warnings.append("Co questionNumber bi trung lap, can giao vien kiem tra lai.")
+        warnings.append("Có số câu hỏi bị trùng. Giáo viên cần kiểm tra lại.")
 
     is_valid = bool(questions) and not any(not question.is_valid for question in questions)
     return PdfExamValidateResponse(
@@ -1328,7 +1474,10 @@ async def validate_exam_pdf(
     answer_key_text: str = Form(default="", alias="answerKeyText"),
 ):
     if not pdf_file.filename or not pdf_file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Chi ho tro file PDF.")
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ tệp PDF.")
+
+    if pdf_file.content_type and pdf_file.content_type.strip().lower() != "application/pdf":
+        raise HTTPException(status_code=415, detail="Định dạng khai báo của tệp không phải PDF (application/pdf).")
 
     cleaned_subject_code = subject_code.strip().upper()
     cleaned_subject_name = subject_name.strip()
@@ -1337,63 +1486,38 @@ async def validate_exam_pdf(
     cleaned_variant_code = variant_code.strip()
 
     if cleaned_subject_code not in {"TOAN", "VAT_LY", "HOA_HOC"}:
-        raise HTTPException(status_code=400, detail="Mon hoc khong hop le.")
+        raise HTTPException(status_code=400, detail="Môn học không hợp lệ.")
 
     if not all((cleaned_subject_name, cleaned_school_name, cleaned_city, cleaned_variant_code)):
-        raise HTTPException(status_code=400, detail="Thieu metadata bat buoc cua de thi.")
+        raise HTTPException(status_code=400, detail="Thiếu thông tin bắt buộc của đề thi.")
 
     if year < 2000 or year > 2100:
-        raise HTTPException(status_code=400, detail="Nam thi khong hop le.")
+        raise HTTPException(status_code=400, detail="Năm thi không hợp lệ.")
 
     if duration_minutes <= 0 or duration_minutes > 300:
-        raise HTTPException(status_code=400, detail="Thoi luong lam bai khong hop le.")
+        raise HTTPException(status_code=400, detail="Thời lượng làm bài không hợp lệ.")
 
     answer_key_map = parse_answer_key_text(answer_key_text)
     tmp_path: Path | None = None
     try:
+        header = await pdf_file.read(8)
+        if not re.fullmatch(rb"%PDF-[0-9]\.[0-9]", header):
+            raise HTTPException(status_code=415, detail="Nội dung tệp không phải PDF.")
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
             tmp_path = Path(tmp_file.name)
+            size = tmp_file.write(header)
             while chunk := await pdf_file.read(1024 * 1024):
+                size += len(chunk)
+                if size > PDF_MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="PDF vượt quá 20 MB.")
                 tmp_file.write(chunk)
 
-        logger.info("Start PDF validation: file=%s subject=%s", pdf_file.filename, cleaned_subject_code)
-        extracted_text = extract_pdf_text(tmp_path)
-        logger.info("Extracted PDF text length: %s", len(extracted_text))
-
-        if len(extracted_text) < PDF_TEXT_EXTRACTION_MIN_CHARS:
-            logger.info("PDF has no text, using Gemini File API fallback.")
-            uploaded_file = client.files.upload(file=str(tmp_path), config={"mime_type": "application/pdf"})
-            try:
-                import asyncio
-                while uploaded_file.state.name == "PROCESSING":
-                    await asyncio.sleep(2)
-                    uploaded_file = client.files.get(name=uploaded_file.name)
-                
-                if uploaded_file.state.name == "FAILED":
-                    raise HTTPException(status_code=500, detail="Gemini khong the OCR file PDF nay.")
-
-                base_prompt = build_pdf_exam_prompt(
-                    pdf_name=pdf_file.filename,
-                    subject_code=cleaned_subject_code,
-                    subject_name=cleaned_subject_name,
-                    answer_key_map=answer_key_map,
-                )
-                prompt = base_prompt + "\n\nDay la file PDF ban goc dang anh/scan. Hay tu dong nhan dien chu trong hinh (OCR) va boc tach thanh cac cau hoi dang text, bo qua hinh anh do thi (tuong tu nhu quet text). Tuyet doi khong giai thich gi them, chi tra ve JSON hop le."
-                raw_model_response = generate_pdf_json([uploaded_file, prompt])
-            finally:
-                client.files.delete(name=uploaded_file.name)
-        else:
-            logger.info("Using text-only Gemini extraction.")
-            prompt = build_pdf_text_exam_prompt(
-                pdf_name=pdf_file.filename,
-                subject_code=cleaned_subject_code,
-                subject_name=cleaned_subject_name,
-                answer_key_map=answer_key_map,
-                extracted_text=extracted_text,
-            )
-            raw_model_response = generate_pdf_json(prompt)
-            
+        raw_model_response = await run_in_threadpool(
+            analyze_pdf, tmp_path, pdf_file.filename, cleaned_subject_code, cleaned_subject_name, answer_key_map
+        )
         parsed_payload = parse_model_json_payload(raw_model_response)
+        if not parsed_payload:
+            raise HTTPException(status_code=502, detail="Dịch vụ phân tích trả về kết quả PDF không hợp lệ.")
 
         response = normalize_pdf_exam_response(
             parsed_payload,
@@ -1427,7 +1551,7 @@ async def validate_exam_pdf(
 async def backfill_school_exam_topics(request: TopicBackfillRequest):
     subject_code = request.subject_code.strip().upper()
     if subject_code not in IMPORT_TOPIC_OPTIONS_BY_SUBJECT:
-        raise HTTPException(status_code=400, detail="Subject code khong hop le cho backfill topic.")
+        raise HTTPException(status_code=400, detail="Môn học không hợp lệ để phân loại chuyên đề.")
 
     response = classify_topics_for_questions(subject_code, request.questions)
     return response.model_dump(by_alias=True)
