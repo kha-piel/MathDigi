@@ -167,7 +167,7 @@ async function fetchSchoolExamCatalogUncached(): Promise<PracticeExamCatalogItem
       return buildFallbackCatalog()
     }
 
-    throw new Error(`KhÃ´ng thá»ƒ táº£i danh sÃ¡ch Ä‘á» trÆ°á»ng tá»« Supabase: ${error.message}`)
+    throw new Error(`Không thể tải danh sách đề trường từ Supabase: ${error.message}`)
   }
 
   if (!data.length) {
@@ -226,7 +226,7 @@ async function fetchSchoolExamByIdUncached(examId: string): Promise<SchoolExamPa
       return buildFallbackExam(examId)
     }
 
-    throw new Error(`KhÃ´ng thá»ƒ táº£i chi tiáº¿t Ä‘á» trÆ°á»ng: ${error.message}`)
+    throw new Error(`Không thể tải chi tiết đề trường: ${error.message}`)
   }
 
   if (!data) {
@@ -300,7 +300,7 @@ async function fetchSchoolExamQuestionsUncached(examId: string): Promise<SchoolE
       return buildFallbackQuestionRecords(examId)
     }
 
-    throw new Error(`KhÃ´ng thá»ƒ táº£i danh sÃ¡ch cÃ¢u há»i Ä‘á» trÆ°á»ng: ${error.message}`)
+    throw new Error(`Không thể tải danh sách câu hỏi đề trường: ${error.message}`)
   }
 
   if (!data.length) {
@@ -385,7 +385,7 @@ async function fetchSchoolExamQuestionSummaryUncached(subjectId: string): Promis
       }))
     }
 
-    throw new Error(`KhÃƒÂ´ng thÃ¡Â»Æ’ tÃ¡ÂºÂ£i tÃ¡Â»â€¢ng quan kho cÃƒÂ¢u hÃ¡Â»Âi Ã„â€˜Ã¡Â»Â trÃ†Â°Ã¡Â»Âng: ${error.message}`)
+    throw new Error(`Không thể tải tổng quan kho câu hỏi đề trường: ${error.message}`)
   }
 
   return data
@@ -425,7 +425,7 @@ async function fetchSchoolExamQuestionBankUncached(subjectId: string): Promise<S
       return getSupplementalQuestionBank(subjectId)
     }
 
-    throw new Error(`KhÃ´ng thá»ƒ táº£i kho cÃ¢u há»i Ä‘á» trÆ°á»ng: ${error.message}`)
+    throw new Error(`Không thể tải kho câu hỏi đề trường: ${error.message}`)
   }
 
   const remoteQuestions = data
@@ -595,8 +595,8 @@ function buildFallbackSections(exam: SchoolExamPaper) {
     {
       sectionId: `${exam.examId}-section-1`,
       partCode: 'multiple_choice' as const,
-      title: 'Pháº§n I. Tráº¯c nghiá»‡m nhiá»u lá»±a chá»n',
-      instructions: 'Má»—i cÃ¢u chá»n 1 trong 4 Ä‘Ã¡p Ã¡n.',
+      title: 'Phần I. Trắc nghiệm nhiều lựa chọn',
+      instructions: 'Mỗi câu chọn 1 trong 4 đáp án.',
       startQuestionNumber: exam.multipleChoiceQuestions[0]?.questionNumber ?? 1,
       endQuestionNumber:
         exam.multipleChoiceQuestions[exam.multipleChoiceQuestions.length - 1]?.questionNumber ?? 0,
@@ -607,8 +607,8 @@ function buildFallbackSections(exam: SchoolExamPaper) {
     {
       sectionId: `${exam.examId}-section-2`,
       partCode: 'true_false' as const,
-      title: 'Pháº§n II. ÄÃºng / Sai',
-      instructions: 'Má»—i cÃ¢u gá»“m cÃ¡c Ã½ a, b, c, d.',
+      title: 'Phần II. Đúng / Sai',
+      instructions: 'Mỗi câu gồm các ý a, b, c, d.',
       startQuestionNumber: exam.trueFalseQuestions[0]?.questionNumber ?? 0,
       endQuestionNumber:
         exam.trueFalseQuestions[exam.trueFalseQuestions.length - 1]?.questionNumber ?? 0,
@@ -619,8 +619,8 @@ function buildFallbackSections(exam: SchoolExamPaper) {
     {
       sectionId: `${exam.examId}-section-3`,
       partCode: 'short_answer' as const,
-      title: 'Pháº§n III. Tráº£ lá»i ngáº¯n',
-      instructions: 'Nhap Ä‘Ã¡p Ã¡n vao o trong.',
+      title: 'Phần III. Trả lời ngắn',
+      instructions: 'Nhap đáp án vao o trong.',
       startQuestionNumber: exam.shortAnswerQuestions[0]?.questionNumber ?? 0,
       endQuestionNumber:
         exam.shortAnswerQuestions[exam.shortAnswerQuestions.length - 1]?.questionNumber ?? 0,
