@@ -370,7 +370,20 @@ for role in anon authenticated; do
   fi
 done
 echo 'PASS: created topics without admin helper has RLS, public reads and no student writes'
-for file in "$R3" "$R2" "$R1"; do
+sql -d empty_case <<'SQL'
+insert into public.topics(topic_id,subject_id,topic_name,topic_slug)
+  select '10000000-0000-0000-0000-000000000001',subject_id,'Added after migration','added-later' from public.subjects;
+insert into public.exams(exam_id,title,school_name,city,year,pdf_url) values ('later-exam','Later','School','City',2026,'');
+insert into public.questions(question_id,exam_id,question_number,question_type,question_text,topic_id)
+  values ('later-question','later-exam',1,'short_answer','Later question','10000000-0000-0000-0000-000000000001');
+SQL
+sql -d empty_case -Atc "select to_jsonb(t)::text from public.topics t union all select to_jsonb(q)::text from public.questions q where topic_id is not null order by 1" > "$WORK/topics.before"
+sql -d empty_case < "$R3" >> "$WORK/empty.log" 2>&1 || { cat "$WORK/empty.log"; exit 1; }
+sql -d empty_case -Atc "select row_data::text from math_only_backup.topics_rollback_rows order by 1" > "$WORK/topics.backup"
+diff -u "$WORK/topics.before" "$WORK/topics.backup"
+[[ $(sql -d empty_case -Atc "select to_regclass('public.topics') is null and not exists (select 1 from pg_attribute where attrelid='public.questions'::regclass and attname='topic_id' and not attisdropped)") == t ]]
+echo 'PASS: 003 rollback backs up every topic and question link including post-migration additions before dropping'
+for file in "$R2" "$R1"; do
   sql -d empty_case < "$file" >> "$WORK/empty.log" 2>&1 || { cat "$WORK/empty.log"; exit 1; }
 done
 echo 'PASS: empty database, missing topics creation/rollback, absent admin helper and Storage schema'

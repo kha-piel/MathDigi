@@ -17,6 +17,18 @@ begin
   end if;
   lock table public.questions, public.topics in share row exclusive mode;
   raise notice '003 rollback before topics=%', (select count(*) from public.topics);
+  create table if not exists math_only_backup.topics_rollback_rows (
+    backup_id bigint generated always as identity primary key,
+    table_name text not null,
+    row_data jsonb not null,
+    created_at timestamptz not null default now()
+  );
+  insert into math_only_backup.topics_rollback_rows(table_name,row_data)
+    select 'public.topics',to_jsonb(t) from public.topics t;
+  insert into math_only_backup.topics_rollback_rows(table_name,row_data)
+    select 'public.questions',to_jsonb(q) from public.questions q where topic_id is not null;
+  raise notice '003 rollback backed up topics=% question links=%', (select count(*) from public.topics),
+    (select count(*) from public.questions where topic_id is not null);
   alter table public.questions drop column topic_id;
   if (state->>'added_policies')::boolean then
     drop policy math_topics_public_select on public.topics;
