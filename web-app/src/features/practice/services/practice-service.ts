@@ -32,7 +32,11 @@ const SUBJECT_ID_TO_CODE: Record<string, string> = {
 const SOFT_MAX_QUESTIONS_PER_SOURCE_EXAM = 3
 const SOFT_MAX_QUESTIONS_PER_TOPIC = 2
 
-const questionBankCacheBySubject = new Map<string, PracticeQuestion[]>()
+const questionBankCacheBySubject = new Map<string, Promise<PracticeQuestion[]>>()
+
+export function invalidatePracticeQuestionBankCache() {
+  questionBankCacheBySubject.clear()
+}
 
 export function searchPracticeExamCatalog(
   catalog: PracticeExamCatalogItem[],
@@ -122,17 +126,26 @@ async function loadPracticeQuestionBank(subjectId: string): Promise<PracticeQues
     return cached
   }
 
+  const pending = loadPracticeQuestionBankUncached(subjectId)
+  questionBankCacheBySubject.set(subjectId, pending)
+  try {
+    return await pending
+  } catch (error) {
+    if (questionBankCacheBySubject.get(subjectId) === pending) {
+      questionBankCacheBySubject.delete(subjectId)
+    }
+    throw error
+  }
+}
+
+async function loadPracticeQuestionBankUncached(subjectId: string): Promise<PracticeQuestion[]> {
   const subjectCode = SUBJECT_ID_TO_CODE[subjectId] ?? subjectId
   const remoteBank = await fetchSchoolExamQuestionBank(subjectCode)
   if (remoteBank.length > 0) {
-    const mappedBank = remoteBank.map((question) => mapSchoolExamQuestionToPracticeQuestion(question, subjectId))
-    questionBankCacheBySubject.set(subjectId, mappedBank)
-    return mappedBank
+    return remoteBank.map((question) => mapSchoolExamQuestionToPracticeQuestion(question, subjectId))
   }
 
-  const mockBank = filterQuestionBankBySubject(await loadMockQuestionBank(), subjectId)
-  questionBankCacheBySubject.set(subjectId, mockBank)
-  return mockBank
+  return filterQuestionBankBySubject(await loadMockQuestionBank(), subjectId)
 }
 
 async function loadMockQuestionBank() {

@@ -62,10 +62,21 @@ export type SchoolExamAttemptDetail = SchoolExamAttemptHistoryItem & {
     selectedAnswer: string
     correctAnswer: string
     isCorrect: boolean
+    skipped: boolean
     questionContent: string
     topic: string
   }>
   aiMessages: SchoolExamAiHistoryMessage[]
+}
+
+const UNANSWERED_PLACEHOLDERS = new Set(['', 'Chưa chọn', 'Chưa nhập'])
+
+export function isSkippedSchoolExamAnswer(questionType: string, selectedAnswer: string) {
+  const value = selectedAnswer.trim()
+  if (UNANSWERED_PLACEHOLDERS.has(value)) {
+    return true
+  }
+  return questionType === 'true_false' && value.includes('-')
 }
 
 export type SchoolExamAiHistoryMessage = {
@@ -293,6 +304,7 @@ export async function fetchSchoolExamAttemptDetail(
         selectedAnswer: answer.selected_answer ?? '',
         correctAnswer: answer.correct_answer ?? '',
         isCorrect: answer.is_correct,
+        skipped: !answer.is_correct && isSkippedSchoolExamAnswer(answer.question_type, answer.selected_answer ?? ''),
         questionContent: answer.question_content ?? '',
         topic: answer.topic ?? '',
       })),

@@ -113,47 +113,52 @@ export function HistoryPage() {
   )
 
   useEffect(() => {
-    if (!authUser?.id) {
-      setIsLoading(false)
-      return
-    }
-
-    if (!hasSupabaseEnv()) {
-      setErrorMessage('Chua co cau hinh Supabase cho web-app.')
-      setIsLoading(false)
-      return
-    }
-
     let isMounted = true
-    setIsLoading(true)
-    setErrorMessage('')
 
-    void Promise.all([
-      fetchSchoolExamAttemptHistory(authUser.id),
-      fetchAttemptHistory(authUser.id),
-      fetchCloudInProgressAttempts(authUser.id),
-      fetchUnifiedAiHistory(authUser.id),
-    ])
-      .then(([schoolRows, practiceRows, cloudRows, aiRows]) => {
-        if (!isMounted) {
-          return
-        }
+    void Promise.resolve().then(() => {
+      if (!isMounted) return
 
-        setSchoolExamHistory(schoolRows)
-        setPracticeHistory(practiceRows)
-        setCloudInProgressAttempts(cloudRows)
-        setAiHistory(aiRows)
-      })
-      .catch((error: unknown) => {
-        if (isMounted) {
-          setErrorMessage(error instanceof Error ? error.message : 'Khong the tai lich su hoc tap.')
-        }
-      })
-      .finally(() => {
-        if (isMounted) {
-          setIsLoading(false)
-        }
-      })
+      if (!authUser?.id) {
+        setIsLoading(false)
+        return
+      }
+
+      if (!hasSupabaseEnv()) {
+        setErrorMessage('Chua co cau hinh Supabase cho web-app.')
+        setIsLoading(false)
+        return
+      }
+
+      setIsLoading(true)
+      setErrorMessage('')
+
+      void Promise.all([
+        fetchSchoolExamAttemptHistory(authUser.id),
+        fetchAttemptHistory(authUser.id),
+        fetchCloudInProgressAttempts(authUser.id),
+        fetchUnifiedAiHistory(authUser.id),
+      ])
+        .then(([schoolRows, practiceRows, cloudRows, aiRows]) => {
+          if (!isMounted) {
+            return
+          }
+
+          setSchoolExamHistory(schoolRows)
+          setPracticeHistory(practiceRows)
+          setCloudInProgressAttempts(cloudRows)
+          setAiHistory(aiRows)
+        })
+        .catch((error: unknown) => {
+          if (isMounted) {
+            setErrorMessage(error instanceof Error ? error.message : 'Khong the tai lich su hoc tap.')
+          }
+        })
+        .finally(() => {
+          if (isMounted) {
+            setIsLoading(false)
+          }
+        })
+    })
 
     return () => {
       isMounted = false
@@ -438,8 +443,16 @@ export function HistoryPage() {
                 <article key={answer.questionNumber} className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="font-bold text-slate-950">Câu {answer.questionNumber}</div>
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${answer.isCorrect ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                      {answer.isCorrect ? 'Đúng' : 'Sai'}
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-bold ${
+                        answer.isCorrect
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : answer.skipped
+                            ? 'bg-slate-200 text-slate-700'
+                            : 'bg-rose-100 text-rose-700'
+                      }`}
+                    >
+                      {answer.isCorrect ? 'Đúng' : answer.skipped ? 'Bỏ qua' : 'Sai'}
                     </span>
                   </div>
                   <p className="mt-2 text-sm text-slate-600">
