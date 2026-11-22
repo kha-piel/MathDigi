@@ -13,6 +13,8 @@ create table if not exists public.security_phase0_005_created_policies (
   policyname name not null,
   primary key (tablename, policyname)
 );
+alter table public.security_phase0_005_created_policies enable row level security;
+revoke all on public.security_phase0_005_created_policies from public, anon, authenticated;
 
 do $migration$
 declare
