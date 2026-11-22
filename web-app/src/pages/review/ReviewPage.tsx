@@ -236,7 +236,7 @@ function ReviewSummaryBody({
   topicLabel: string
 }) {
   const [weaknessAnalysis, setWeaknessAnalysis] = useState('')
-  useEffect(() => clearTutorContext, [])
+  const [tutorQuestionId, setTutorQuestionId] = useState<string | null>(null)
   const [recommendedTopics, setRecommendedTopics] = useState<KnowledgeReviewTopic[]>([])
   const [analysisError, setAnalysisError] = useState('')
   const [isAnalyzing, setIsAnalyzing] = useState(false)
@@ -258,6 +258,19 @@ function ReviewSummaryBody({
       }, {}),
     [questionBank],
   )
+
+  useEffect(() => {
+    const selectedIndex = summary.reviewItems.findIndex((item) => item.questionId === tutorQuestionId)
+    const index = selectedIndex < 0 ? 0 : selectedIndex
+    const item = summary.reviewItems[index]
+    if (item) {
+      const question = questionMap[item.questionId]
+      setTutorContext({ question_number: index + 1, question_content: item.questionContent, options: question ? tutorQuestionOptions(question) : undefined, question_type: question?.questionType, topic: sessionTopicName, student_answer: item.selectedAnswerText, correct_answer: item.correctAnswerText, solution: item.explanation ?? question?.explanation ?? '', source: 'review' })
+    } else {
+      clearTutorContext()
+    }
+    return clearTutorContext
+  }, [summary.reviewItems, tutorQuestionId, questionMap, sessionTopicName])
 
   const flaggedCount = useMemo(() => {
     if (!allowFlagging || !sessionSubjectId || !sessionTopicId) {
@@ -545,7 +558,7 @@ function ReviewSummaryBody({
           const isFlagged = allowFlagging && sessionSubjectId && sessionTopicId && flaggedItems[`${sessionSubjectId}::${sessionTopicId}::${item.questionId}`]
 
           return (
-            <section key={item.questionId} onClick={() => setTutorContext({ question_number: index + 1, question_content: item.questionContent, options: question ? tutorQuestionOptions(question) : undefined, question_type: question?.questionType, topic: sessionTopicName, student_answer: item.selectedAnswerText, correct_answer: item.correctAnswerText, solution: item.explanation ?? '', source: 'review' })} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <section key={item.questionId} onClick={() => setTutorQuestionId(item.questionId)} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4">
                 <h3 className="text-xl font-bold text-slate-900">Câu {index + 1}</h3>
                 <div className="flex items-center gap-3">
