@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildBlueprintQuestions, contentFingerprint, deduplicateQuestions } from '../src/features/practice/services/practice-exam-builder.ts'
+import { buildBlueprintQuestions, contentFingerprint, deduplicateQuestions, isContextDependentQuestion } from '../src/features/practice/services/practice-exam-builder.ts'
 import { fetchQuestionPages } from '../src/features/practice/services/practice-pool-loader.ts'
 import { practiceBlueprints } from '../src/features/practice/data/practice-blueprints.ts'
 import { buildSubmissionSummary, checkQuestion, createExamRuntimeSession, formatCorrectResponse } from '../src/features/exam/core/exam-session.ts'
@@ -26,6 +26,44 @@ function question(id, level = 2, type = 'multiple_choice') {
 }
 const build = (questionBank, options = {}) => buildBlueprintQuestions({
   blueprint, questionBank, seed: 123, ...options,
+})
+
+test('context-dependent question detection covers numbered and relative references', () => {
+  for (const text of [
+    'Với miền ở câu 29, GTLN của $F=x-y$ bằng', 'Sử dụng câu 29 để tính.',
+    'Dùng dữ kiện ở câu trên.', 'Dựa vào câu trước.', 'Câu hỏi trên cho kết quả nào?',
+    'Kết quả câu trước là gì?', 'Dữ kiện câu trên cho biết điều gì?',
+    'THEO KET QUA CAU 29', 'DỮ KIỆN CỦA CÂU HỎI TRƯỚC',
+    'Câu 30. Sử dụng kết quả câu 29.', 'Theo dữ kiện ở câu hỏi số 29.',
+  ]) assert.equal(isContextDependentQuestion(text, 30), true, text)
+})
+
+test('standalone questions, TF labels and own question numbers are not dependencies', () => {
+  for (const text of [
+    '', 'Tìm GTLN của $F=x-y$.', 'Câu a) Hàm số đồng biến. Câu b) Giá trị bằng 2.',
+    'Câu 29. Tính diện tích miền.', '**Câu 29:** Tính diện tích miền.',
+    'Câu hỏi 29: Cho hình lập phương.', 'Ở câu lạc bộ có 29 học sinh.',
+    'Có bao nhiêu câu trả lời đúng?', 'Trả lời câu hỏi sau: Tính 2+2.',
+    'Trong câu 29 này, tìm GTLN.',
+    'Lượng thực phẩm nhỏ nhất thỏa mãn yêu cầu trên là bao nhiêu?',
+    'Nhu cầu trước đây là 29 sản phẩm.',
+  ]) assert.equal(isContextDependentQuestion(text, 29), false, text)
+  assert.equal(isContextDependentQuestion('Câu 29. Tính diện tích miền.'), false)
+  assert.equal(isContextDependentQuestion('Câu 29\nTính diện tích miền.'), false)
+  assert.equal(isContextDependentQuestion('Câu 29'), false)
+  assert.equal(isContextDependentQuestion('Câu 29. Dùng kết quả câu 28.', 29), true)
+})
+
+test('balanced and random mock pools exclude dependent questions without mutating the source', () => {
+  const standalone = question('standalone')
+  const dependent = { ...question('dependent'), content: 'Với miền ở câu 29, GTLN của F bằng' }
+  for (const mode of ['balanced', 'random']) {
+    const result = build([standalone, dependent], { blueprint: singleSection(2), mode })
+    assert.deepEqual(result.questions.map((q) => q.questionId), ['standalone'])
+    assert.ok(result.warnings.length)
+    assert.throws(() => build([dependent], { blueprint: singleSection(1), mode }))
+  }
+  assert.equal(dependent.content, 'Với miền ở câu 29, GTLN của F bằng')
 })
 
 test('small pool returns a partial exam and warnings without throwing', () => {

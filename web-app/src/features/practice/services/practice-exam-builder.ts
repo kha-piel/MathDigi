@@ -36,6 +36,21 @@ export function contentFingerprint(type: string, text: string, options: string[]
   return JSON.stringify([type, normalize(text), options.map(normalize).sort(), [...new Set(assets)].sort()])
 }
 
+export function isContextDependentQuestion(content: string, ownQuestionNumber?: number) {
+  const normalized = content.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd').toLowerCase().trim()
+    .replace(/^(?:#{1,6}\s*)?(?:\*\*)?cau(?: hoi)?\s+\d+[ \t]*(?:\*\*)?[ \t]*(?:[.:)]|\r?\n|$)\s*/, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\b(?:yeu|nhu) cau\b/g, 'request')
+  let referencesAnotherNumber = false
+  const withoutNumbers = normalized.replace(/\bcau(?: hoi)?\s+(?:so\s+)?(\d+)\b/g, (_match, number: string) => {
+    if (Number(number) !== ownQuestionNumber) referencesAnotherNumber = true
+    return ''
+  })
+  return referencesAnotherNumber || /\bcau(?: hoi)?\s+(?:tren|truoc|vua roi)\b/.test(withoutNumbers)
+    || /\b(?:o|ket qua(?: cua)?|du kien(?: cua)?)\s+cau(?: hoi)?\b(?!\s+lac bo\b)/.test(withoutNumbers)
+}
+
 export function buildBlueprintQuestions(input: {
   blueprint: PracticeBlueprint
   questionBank: PracticeQuestion[]
@@ -49,7 +64,9 @@ export function buildBlueprintQuestions(input: {
   const used = new Set<string>()
   const examCounts = new Map<string, number>()
   const topicCounts = new Map<string, number>()
-  const bank = deduplicateQuestions(input.questionBank, (q) => contentFingerprint(
+  const independentQuestions = input.questionBank.filter((q) =>
+    !isContextDependentQuestion(q.content, q.sourceMeta?.sourceQuestionNumber))
+  const bank = deduplicateQuestions(independentQuestions, (q) => contentFingerprint(
     q.questionType, q.content, q.questionType === 'true_false'
       ? (q.statements ?? []).map((s) => s.content) : q.answers.map((a) => a.content),
     q.assetUrls?.length ? q.assetUrls : q.hasImage ? [`source:${q.sourceExamId}:${q.questionId}`] : [],
