@@ -134,6 +134,33 @@ class PdfImportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(too_large.status_code, 413)
         analyze.assert_not_called()
 
+    async def test_upload_rejects_a_valid_pdf_with_the_wrong_declared_mime(self):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://testserver") as api:
+            with patch.object(main, "analyze_pdf") as analyze:
+                response = await api.post("/api/admin/import-exam-pdf/validate", data=FORM, files={
+                    "pdfFile": (SAMPLE.name, SAMPLE.read_bytes(), "text/plain"),
+                })
+        self.assertEqual(response.status_code, 415)
+        self.assertEqual(response.json()["detail"], "Định dạng khai báo của tệp không phải PDF (application/pdf).")
+        analyze.assert_not_called()
+
+    async def test_upload_accepts_an_empty_declared_mime_only_if_the_signature_passes(self):
+        endpoint = "/api/admin/import-exam-pdf/validate"
+        headers = {"Content-Type": ""}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://testserver") as api:
+            with patch.object(main, "analyze_pdf", return_value='{"questions":[]}') as analyze:
+                fake = await api.post(endpoint, data=FORM, files={
+                    "pdfFile": ("fake.pdf", b"not a PDF", None, headers),
+                })
+                valid = await api.post(endpoint, data=FORM, files={
+                    "pdfFile": (SAMPLE.name, SAMPLE.read_bytes(), None, headers),
+                })
+        self.assertEqual(fake.status_code, 415)
+        self.assertEqual(fake.json()["detail"], "Nội dung tệp không phải PDF.")
+        self.assertEqual(valid.status_code, 200)
+        self.assertEqual(valid.json()["examDraft"]["title"], "Đề thi Toán Cầu Giấy 2026 - Mã 101")
+        analyze.assert_called_once()
+
     async def test_gemini_key_rejection_returns_a_readable_provider_error(self):
         provider_error = ClientError(400, {"error": {
             "message": "Provider error text should not be returned to the browser",

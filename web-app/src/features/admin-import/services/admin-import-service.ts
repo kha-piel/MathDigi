@@ -150,6 +150,7 @@ type ManagedExamQuestionRow = {
 type SectionPart = AdminQuestionType
 
 const STORAGE_BUCKET = 'school-exams'
+const PDF_MIME_TYPE = 'application/pdf'
 
 export const subjectOptions: Array<{
   code: SubjectCode
@@ -241,7 +242,7 @@ export async function requestExamPdfValidation(input: {
   }
 
   const formData = new FormData()
-  formData.append('pdfFile', input.pdfFile)
+  formData.append('pdfFile', withPdfMimeType(input.pdfFile))
   formData.append('subjectCode', input.metadata.subjectCode)
   formData.append('subjectName', input.metadata.subjectName)
   formData.append('schoolName', input.metadata.schoolName)
@@ -404,7 +405,25 @@ export function getDraftValidationIssues(input: {
   return issues
 }
 
+export function getPdfFileTypeIssue(file: File) {
+  if (file.type && file.type !== PDF_MIME_TYPE) {
+    return 'Định dạng khai báo của tệp không phải PDF (application/pdf).'
+  }
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    return 'Chỉ hỗ trợ tệp PDF.'
+  }
+  return null
+}
+
+function withPdfMimeType(file: File) {
+  return file.type === PDF_MIME_TYPE
+    ? file
+    : new File([file], file.name, { type: PDF_MIME_TYPE, lastModified: file.lastModified })
+}
+
 async function fingerprintPdf(file: File, checkPages = false) {
+  const fileTypeIssue = getPdfFileTypeIssue(file)
+  if (fileTypeIssue) throw new Error(fileTypeIssue)
   if (file.size > 20 * 1024 * 1024) throw new Error('PDF vượt quá 20 MB.')
   const header = await file.slice(0, 8).text()
   if (!/^%PDF-[0-9]\.[0-9]$/.test(header)) throw new Error('Nội dung tệp không phải PDF.')
@@ -463,7 +482,7 @@ export async function saveAdminImportedExam(input: SaveAdminImportedExamInput) {
   let questions: AdminImportQuestion[]
   let commitUnknown = false
   try {
-    const pdfUrl = await uploadImportObject(`${prefix}/source.pdf`, input.pdfFile, 'application/pdf', paths)
+    const pdfUrl = await uploadImportObject(`${prefix}/source.pdf`, withPdfMimeType(input.pdfFile), PDF_MIME_TYPE, paths)
     questions = await uploadQuestionAssets(prefix, normalized, paths)
     const bundle = buildImportBundle(examId, questions, {
       title: examDraft.title,

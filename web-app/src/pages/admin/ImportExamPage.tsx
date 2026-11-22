@@ -18,6 +18,7 @@ import {
   fetchManagedImportedExamDraft,
   fetchManagedImportedExams,
   getDraftValidationIssues,
+  getPdfFileTypeIssue,
   getQuestionValidationIssues,
   requestExamPdfValidation,
   saveAdminImportedExam,
@@ -154,8 +155,9 @@ export function ImportExamPage() {
   }
 
   function handleSelectedFile(file: File) {
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-      toast.error('Chỉ hỗ trợ tệp PDF.')
+    const fileTypeIssue = getPdfFileTypeIssue(file)
+    if (fileTypeIssue) {
+      toast.error(fileTypeIssue)
       return
     }
 

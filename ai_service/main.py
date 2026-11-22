@@ -881,12 +881,12 @@ def normalize_pdf_question(
         question_number = int(question_number_raw)
     except (TypeError, ValueError):
         question_number = fallback_number
-        warnings.append("Khong doc duoc questionNumber, da gan theo thu tu fallback.")
+        warnings.append("Không đọc được số câu hỏi nên đã đánh số theo thứ tự xuất hiện.")
 
     question_type = str(item.get("questionType", item.get("question_type", ""))).strip()
     if question_type not in {"multiple_choice", "true_false", "short_answer"}:
         question_type = "multiple_choice"
-        warnings.append("Khong doc duoc questionType, tam gan multiple_choice.")
+        warnings.append("Không xác định được loại câu hỏi nên tạm xếp vào phần trắc nghiệm nhiều lựa chọn.")
 
     raw_options = item.get("options", [])
     option_map: dict[str, str] = {}
@@ -1013,7 +1013,7 @@ def normalize_pdf_exam_response(
     asset_root_path = f"{subject_code}/{year}/{exam_id}"
     exam_draft = PdfExamDraft(
         exam_id=exam_id,
-        title=f"De thi {subject_name} {school_name} {year} - Ma {variant_code}",
+        title=f"Đề thi {subject_name} {school_name} {year} - Mã {variant_code}",
         school_name=school_name,
         city=city,
         subject_code=subject_code,
@@ -1459,6 +1459,9 @@ async def validate_exam_pdf(
 ):
     if not pdf_file.filename or not pdf_file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Chỉ hỗ trợ tệp PDF.")
+
+    if pdf_file.content_type and pdf_file.content_type.strip().lower() != "application/pdf":
+        raise HTTPException(status_code=415, detail="Định dạng khai báo của tệp không phải PDF (application/pdf).")
 
     cleaned_subject_code = subject_code.strip().upper()
     cleaned_subject_name = subject_name.strip()
