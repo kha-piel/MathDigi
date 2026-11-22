@@ -67,6 +67,7 @@ function UserTutorChat({ userId }: { userId: string }) {
       }
     } finally {
       window.clearTimeout(timer)
+      setMessages((current) => current.filter((message) => message.role !== 'assistant' || message.content.trim()))
       setBusy(false)
       controller.current = null
       if (useTutorStore.getState().activeController === abort) useTutorStore.getState().setActiveController(null)

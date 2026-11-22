@@ -62,3 +62,35 @@ it('retries the failed message without clearing a separate unsent draft', async 
   expect(service.streamTutor.mock.calls[1][0]).toEqual([{ role: 'user', content: 'Giải bài toán này' }])
   expect(document.querySelector('textarea')!.value).toBe('Bản nháp câu hỏi tiếp theo')
 })
+
+it('removes the empty assistant placeholder on a stream error', async () => {
+  service.streamTutor.mockRejectedValueOnce(new Error('Lỗi mạng'))
+  await typeDraft('Câu hỏi')
+  await submit()
+  expect(document.body.textContent).toContain('Lỗi mạng')
+  expect(document.body.textContent).not.toContain('Đang suy nghĩ…')
+  expect([...document.querySelectorAll('p')].some((p) => p.textContent === 'Gia sư')).toBe(false)
+})
+
+it('removes the empty assistant placeholder when stopped', async () => {
+  service.streamTutor.mockImplementationOnce((_messages, _context, _reveal, signal: AbortSignal) => new Promise((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+  }))
+  await typeDraft('Câu hỏi')
+  await submit()
+  expect(document.body.textContent).toContain('Đang suy nghĩ…')
+  await click('Dừng')
+  expect(document.body.textContent).not.toContain('Đang suy nghĩ…')
+  expect(document.querySelector('[role="alert"]')).toBeNull()
+})
+
+it('retains partial assistant content when a stream fails', async () => {
+  service.streamTutor.mockImplementationOnce(async (_messages, _context, _reveal, _signal, onDelta: (text: string) => void) => {
+    onDelta('Gợi ý bước đầu')
+    throw new Error('Mất kết nối')
+  })
+  await typeDraft('Câu hỏi')
+  await submit()
+  expect(document.body.textContent).toContain('Gợi ý bước đầu')
+  expect(document.body.textContent).not.toContain('Đang suy nghĩ…')
+})
