@@ -94,6 +94,17 @@ test('deduplication normalizes Unicode and whitespace, preserves first source an
   assert.deepEqual(result.map((q) => q.questionId), ['one', 'three'])
 })
 
+test('different diagrams survive deduplication while the same diagram still dedupes', () => {
+  const first = { ...question('image-one'), assetUrls: ['/exam-a/diagram.png'] }
+  const second = { ...first, questionId: 'image-two', assetUrls: ['/exam-b/diagram.png'] }
+  const copy = { ...first, questionId: 'image-copy', answers: [...first.answers].reverse() }
+  const result = build([first, second, copy], { blueprint: singleSection(3) })
+  assert.deepEqual(new Set(result.questions.map((q) => q.questionId)), new Set(['image-one', 'image-two']))
+  const unknownImages = ['one', 'two'].map((questionId) => ({ ...first, questionId, assetUrls: [], hasImage: true }))
+  assert.equal(build(unknownImages, { blueprint: singleSection(2) }).questions.length, 2)
+  assert.equal(contentFingerprint('mc', 'x', ['A'], ['/a', '/b']), contentFingerprint('mc', 'x', ['A'], ['/b', '/a', '/a']))
+})
+
 test('option shuffle keeps IDs/correctness and presented labels consistent with grading and review', () => {
   const source = question('mc')
   const result = build([source], { blueprint: singleSection(1) })

@@ -149,6 +149,7 @@ function mapSchoolExamQuestionToPracticeQuestion(
     subjectName: getSubjectName(subjectId),
     level: question.difficultyLevel,
     questionType: question.questionType,
+    hasImage: question.hasImage,
     explanation: question.solution ?? null,
     obsidianSourcePath: question.obsidianSourcePath,
     answers: question.options.map((option) => ({

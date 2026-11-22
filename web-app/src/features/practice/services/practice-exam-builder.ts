@@ -31,9 +31,9 @@ export function deduplicateQuestions<T>(questions: T[], key: (question: T) => st
   })
 }
 
-export function contentFingerprint(type: string, text: string, options: string[]) {
+export function contentFingerprint(type: string, text: string, options: string[], assets: string[] = []) {
   const normalize = (value: string) => value.normalize('NFC').replace(/\s+/g, ' ').trim()
-  return JSON.stringify([type, normalize(text), options.map(normalize).sort()])
+  return JSON.stringify([type, normalize(text), options.map(normalize).sort(), [...new Set(assets)].sort()])
 }
 
 export function buildBlueprintQuestions(input: {
@@ -52,6 +52,7 @@ export function buildBlueprintQuestions(input: {
   const bank = deduplicateQuestions(input.questionBank, (q) => contentFingerprint(
     q.questionType, q.content, q.questionType === 'true_false'
       ? (q.statements ?? []).map((s) => s.content) : q.answers.map((a) => a.content),
+    q.assetUrls?.length ? q.assetUrls : q.hasImage ? [`source:${q.sourceExamId}:${q.questionId}`] : [],
   ))
   const mode = input.mode ?? 'balanced'
   const questions = input.blueprint.sections.flatMap((section) => {

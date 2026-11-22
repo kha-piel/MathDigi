@@ -1,6 +1,7 @@
 ﻿import { getSupabaseBrowserClient } from '../../../lib/supabase/client'
 import { fetchQuestionPages } from './practice-pool-loader'
 import { contentFingerprint, deduplicateQuestions } from './practice-exam-builder'
+import { buildQuestionAssetUrls } from '../utils/question-assets'
 import { hasSupabaseEnv } from '../../../lib/config/env'
 import type { PracticeExamCatalogItem } from '../types/practice-types'
 import {
@@ -427,7 +428,9 @@ async function fetchSchoolExamQuestionBankUncached(subjectId: string): Promise<S
     contentFingerprint(question.questionType, question.questionText,
       question.questionType === 'true_false'
         ? question.statements.map((statement) => statement.text)
-        : question.options.map((option) => option.optionText)),
+        : question.options.map((option) => option.optionText),
+      buildQuestionAssetUrls(question).length ? buildQuestionAssetUrls(question)
+        : question.hasImage ? [`source:${question.examId}:${question.questionId}`] : []),
   )
 }
 
