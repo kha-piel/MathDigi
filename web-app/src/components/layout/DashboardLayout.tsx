@@ -85,7 +85,7 @@ export function DashboardLayout() {
           </aside>
         )}
 
-        <div className="flex min-h-[100dvh] flex-1 flex-col">
+        <div className="flex min-h-[100dvh] min-w-0 flex-1 flex-col">
           {!isFullScreenMode && (
             <header className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur md:hidden">
               <NavLink

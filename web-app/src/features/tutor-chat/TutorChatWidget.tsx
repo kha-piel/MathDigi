@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { MessageCircle, X } from 'lucide-react'
 import { MarkdownContent } from '../../components/ui/MarkdownContent'
 import { useAuthSessionStore } from '../auth/store/auth-session-store'
@@ -8,7 +9,7 @@ import { limitHistory, useTutorStore, type ChatMessage } from './store'
 export function TutorChatWidget() {
   const userId = useAuthSessionStore((s) => s.user?.id)
   const disabled = useTutorStore((s) => s.disabledReason)
-  return userId && !disabled ? <UserTutorChat key={userId} userId={userId} /> : null
+  return userId && !disabled && typeof document !== 'undefined' ? createPortal(<UserTutorChat key={userId} userId={userId} />, document.body) : null
 }
 
 function UserTutorChat({ userId }: { userId: string }) {

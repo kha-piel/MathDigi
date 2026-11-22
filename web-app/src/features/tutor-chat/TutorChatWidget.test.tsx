@@ -63,6 +63,13 @@ it('retries the failed message without clearing a separate unsent draft', async 
   expect(document.querySelector('textarea')!.value).toBe('Bản nháp câu hỏi tiếp theo')
 })
 
+it('mounts the fixed launcher outside the page layout', () => {
+  const launcher = document.querySelector('[aria-label="Đóng gia sư Toán"]')!
+  expect(container.contains(launcher)).toBe(false)
+  expect(launcher.parentElement!.parentElement).toBe(document.body)
+  expect(launcher.parentElement!.className).toContain('fixed bottom-4 right-4')
+})
+
 it('removes the empty assistant placeholder on a stream error', async () => {
   service.streamTutor.mockRejectedValueOnce(new Error('Lỗi mạng'))
   await typeDraft('Câu hỏi')

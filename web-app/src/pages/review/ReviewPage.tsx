@@ -457,7 +457,7 @@ function ReviewSummaryBody({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 max-w-full space-y-6 [overflow-wrap:anywhere]">
       <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)]">
         <button
           disabled={isAnalyzing}
@@ -661,7 +661,7 @@ function ReviewSummaryBody({
                         }
                       }}
                       placeholder="Hỏi thêm AI về câu này..."
-                      className="flex-1 rounded-xl border border-indigo-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-400"
+                      className="min-w-0 flex-1 rounded-xl border border-indigo-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-400"
                       type="text"
                       value={reviewChatInput}
                     />
