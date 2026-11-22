@@ -1,3 +1,4 @@
+import { buildQuestionAssetUrls as buildAssetUrls } from '../../features/practice/utils/question-assets'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { MarkdownContent } from '../../components/ui/MarkdownContent'
@@ -438,24 +439,6 @@ function mapSchoolExamQuestionToDraftQuestion(question: SchoolExamQuestionRecord
       sourceSectionNumber: question.sourceSectionNumber,
     },
   }
-}
-
-function buildAssetUrls(question: SchoolExamQuestionRecord) {
-  const pdfUrl = question.pdfUrl ?? ''
-  if (!pdfUrl) {
-    return []
-  }
-
-  const examSlug = pdfUrl.split('/').pop()?.replace(/\.pdf$/i, '') ?? ''
-  const renderableAssets =
-    question.assets && question.assets.length > 0
-      ? question.assets
-          .filter((asset) => asset.assetType === 'figure')
-          .sort((left, right) => left.displayOrder - right.displayOrder)
-          .map((asset) => asset.assetPath)
-      : question.assetPaths.filter((assetPath) => /_hinh\d+\./i.test(assetPath))
-
-  return renderableAssets.map((assetPath) => `/school-exam-assets/${examSlug}/${assetPath}`)
 }
 
 function buildDifficultyLabel(

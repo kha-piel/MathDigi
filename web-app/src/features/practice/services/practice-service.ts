@@ -1,3 +1,4 @@
+import { buildQuestionAssetUrls as buildAssetUrls } from '../utils/question-assets'
 import { buildBlueprintQuestions, type PracticeSelectionMode } from './practice-exam-builder'
 import { practiceBlueprints } from '../data/practice-blueprints'
 import { fetchSchoolExamQuestionBank, fetchSchoolExamQuestionSummary, invalidateSchoolExamCaches } from './school-exam-service'
@@ -214,21 +215,6 @@ function splitAcceptedResponses(input: string) {
     .split('|')
     .map((item) => item.trim())
     .filter(Boolean)
-}
-
-function buildAssetUrls(question: Awaited<ReturnType<typeof fetchSchoolExamQuestionBank>>[number]) {
-  const examSlug = (question.pdfUrl ?? '').split('/').pop()?.replace(/\.pdf$/i, '') ?? ''
-  const renderableAssets = question.assets && question.assets.length > 0
-    ? question.assets
-      .filter((asset) => asset.assetType === 'figure')
-      .sort((left, right) => left.displayOrder - right.displayOrder)
-      .map((asset) => asset.assetPath)
-    : (question.assetPaths ?? []).filter((assetPath) => /_hinh\d+\./i.test(assetPath))
-
-  return renderableAssets.map((assetPath) =>
-    /^(https?:\/\/|\/)/i.test(assetPath) ? assetPath : examSlug
-      ? `/school-exam-assets/${examSlug}/${assetPath}` : assetPath,
-  )
 }
 
 function buildTopicId(question: Awaited<ReturnType<typeof fetchSchoolExamQuestionBank>>[number]) {

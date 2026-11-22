@@ -1,3 +1,4 @@
+import { buildQuestionAssetUrls as buildSchoolExamAssetUrls } from '../../practice/utils/question-assets'
 ﻿import { getSupabaseBrowserClient } from '../../../lib/supabase/client'
 import { isMissingHistoryTable, practiceKindFilter } from '../../exam/core/practice-attempt'
 import {
@@ -459,24 +460,6 @@ function mapSchoolExamQuestionToDraftQuestion(
       sourceSectionNumber: question.sourceSectionNumber,
     },
   }
-}
-
-function buildSchoolExamAssetUrls(
-  question: Awaited<ReturnType<typeof fetchSchoolExamQuestionBank>>[number],
-) {
-  if (!question.pdfUrl) {
-    return []
-  }
-
-  const examSlug = question.pdfUrl.split('/').pop()?.replace(/\.pdf$/i, '') ?? ''
-  const renderableAssets = question.assets && question.assets.length > 0
-    ? question.assets
-      .filter((asset) => asset.assetType === 'figure')
-      .sort((left, right) => left.displayOrder - right.displayOrder)
-      .map((asset) => asset.assetPath)
-    : (question.assetPaths ?? []).filter((assetPath) => /_hinh\d+\./i.test(assetPath))
-
-  return renderableAssets.map((assetPath) => `/school-exam-assets/${examSlug}/${assetPath}`)
 }
 
 function resolveTrueFalseCorrectness(answerValue: string, index: number) {
