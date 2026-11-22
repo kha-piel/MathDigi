@@ -144,8 +144,9 @@ export function formatQuestionResponse(runtime: ExamRuntimeSession, question: Dr
     const selectedMap = getSelectedTrueFalseMap(runtime, question.questionId)
     const statements = question.statements ?? []
     const answeredLines = statements
-      .filter((statement) => statement.statementId in selectedMap)
-      .map((statement, index) => `${String.fromCharCode(97 + index)}) ${selectedMap[statement.statementId] ? 'Đúng' : 'Sai'}`)
+      .map((statement, index) => ({ statement, letter: String.fromCharCode(97 + index) }))
+      .filter(({ statement }) => statement.statementId in selectedMap)
+      .map(({ statement, letter }) => `${letter}) ${selectedMap[statement.statementId] ? 'Đúng' : 'Sai'}`)
 
     return answeredLines.length > 0 ? answeredLines.join(' | ') : 'Chưa chọn đáp án'
   }
