@@ -479,7 +479,7 @@ export function SchoolExamPage() {
       await persistReviewAiMessages(item.questionNumber, [
         {
           role: 'user',
-          content: `Vi sao ${item.displayQuestionLabel.toLowerCase()} em lam sai?`,
+          content: `Vì sao ${item.displayQuestionLabel.toLowerCase()} em làm sai?`,
         },
         {
           role: 'assistant',
@@ -776,7 +776,7 @@ export function SchoolExamPage() {
 
             <p className="mt-3 text-sm leading-7 text-slate-600">
               Bấm vào từng câu để mở tab review. Tab này hiện câu hỏi, hình ảnh liên quan, đáp án học sinh chọn
-              va khung tro chuyen voi AI.
+              và khung trò chuyện với AI.
             </p>
 
             <div className="mt-5 space-y-5">
