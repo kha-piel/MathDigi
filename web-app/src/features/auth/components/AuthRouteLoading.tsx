@@ -9,18 +9,21 @@ export function AuthRouteLoading({
   message,
   delayMs = 250,
 }: AuthRouteLoadingProps) {
-  const [shouldShow, setShouldShow] = useState(delayMs <= 0)
+  const [visibility, setVisibility] = useState({ delayMs, message, shouldShow: delayMs <= 0 })
+  const matchesProps = visibility.delayMs === delayMs && visibility.message === message
+  const shouldShow = matchesProps ? visibility.shouldShow : delayMs <= 0
+
+  if (!matchesProps) {
+    setVisibility({ delayMs, message, shouldShow: delayMs <= 0 })
+  }
 
   useEffect(() => {
     if (delayMs <= 0) {
-      setShouldShow(true)
       return
     }
 
-    setShouldShow(false)
-
     const timeoutId = window.setTimeout(() => {
-      setShouldShow(true)
+      setVisibility({ delayMs, message, shouldShow: true })
     }, delayMs)
 
     return () => {

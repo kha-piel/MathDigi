@@ -17,52 +17,57 @@ export function StudentProfilePage() {
   const [successMessage, setSuccessMessage] = useState('')
 
   useEffect(() => {
-    if (!user?.id) {
-      setIsLoading(false)
-      return
-    }
-
     let isMounted = true
-    setIsLoading(true)
-    setErrorMessage('')
 
-    void fetchStudentProfile(user.id)
-      .then((row) => {
-        if (!isMounted) {
-          return
-        }
+    void Promise.resolve().then(() => {
+      if (!isMounted) return
 
-        setProfile(
-          row ?? {
-            userId: user.id,
-            email: user.email,
-            username: user.username ?? '',
-            fullName: user.fullName ?? '',
-            role: user.role ?? 'student',
-            status: user.status ?? 'active',
-            schoolName: '',
-            provinceCity: '',
-            className: '',
-            phoneNumber: '',
-            thptqgExamYear: '',
-            admissionCombo: '',
-            targetScore: '',
-            targetUniversity: '',
-            targetMajor: '',
-            studyNote: '',
-          },
-        )
-      })
-      .catch((error: unknown) => {
-        if (isMounted) {
-          setErrorMessage(error instanceof Error ? error.message : 'Khong the tai ho so hoc sinh.')
-        }
-      })
-      .finally(() => {
-        if (isMounted) {
-          setIsLoading(false)
-        }
-      })
+      if (!user?.id) {
+        setIsLoading(false)
+        return
+      }
+
+      setIsLoading(true)
+      setErrorMessage('')
+
+      void fetchStudentProfile(user.id)
+        .then((row) => {
+          if (!isMounted) {
+            return
+          }
+
+          setProfile(
+            row ?? {
+              userId: user.id,
+              email: user.email,
+              username: user.username ?? '',
+              fullName: user.fullName ?? '',
+              role: user.role ?? 'student',
+              status: user.status ?? 'active',
+              schoolName: '',
+              provinceCity: '',
+              className: '',
+              phoneNumber: '',
+              thptqgExamYear: '',
+              admissionCombo: '',
+              targetScore: '',
+              targetUniversity: '',
+              targetMajor: '',
+              studyNote: '',
+            },
+          )
+        })
+        .catch((error: unknown) => {
+          if (isMounted) {
+            setErrorMessage(error instanceof Error ? error.message : 'Khong the tai ho so hoc sinh.')
+          }
+        })
+        .finally(() => {
+          if (isMounted) {
+            setIsLoading(false)
+          }
+        })
+    })
 
     return () => {
       isMounted = false

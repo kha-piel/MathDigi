@@ -52,34 +52,38 @@ export function DashboardPage() {
   useEffect(() => {
     let isMounted = true
 
-    if (!hasSupabaseEnv()) {
-      setIsLoadingSubjects(false)
-      setErrorMessage(
-        'Chưa có env Supabase cho web-app. Copy web-app/.env.example thành web-app/.env.local và điền giá trị thật.',
-      )
-      return
-    }
+    void Promise.resolve().then(() => {
+      if (!isMounted) return
 
-    setIsLoadingSubjects(true)
-    setErrorMessage('')
+      if (!hasSupabaseEnv()) {
+        setIsLoadingSubjects(false)
+        setErrorMessage(
+          'Chưa có env Supabase cho web-app. Copy web-app/.env.example thành web-app/.env.local và điền giá trị thật.',
+        )
+        return
+      }
 
-    void fetchSubjects()
-      .then((rows) => {
-        if (isMounted) {
-          const allowedSubjectIds = new Set(allowedMainSubjects.map((subject) => subject.subjectId))
-          setSubjects(rows.filter((subject) => allowedSubjectIds.has(subject.subjectId)))
-        }
-      })
-      .catch((error: unknown) => {
-        if (isMounted) {
-          setErrorMessage(error instanceof Error ? error.message : 'Không thể tải môn học.')
-        }
-      })
-      .finally(() => {
-        if (isMounted) {
-          setIsLoadingSubjects(false)
-        }
-      })
+      setIsLoadingSubjects(true)
+      setErrorMessage('')
+
+      void fetchSubjects()
+        .then((rows) => {
+          if (isMounted) {
+            const allowedSubjectIds = new Set(allowedMainSubjects.map((subject) => subject.subjectId))
+            setSubjects(rows.filter((subject) => allowedSubjectIds.has(subject.subjectId)))
+          }
+        })
+        .catch((error: unknown) => {
+          if (isMounted) {
+            setErrorMessage(error instanceof Error ? error.message : 'Không thể tải môn học.')
+          }
+        })
+        .finally(() => {
+          if (isMounted) {
+            setIsLoadingSubjects(false)
+          }
+        })
+    })
 
     return () => {
       isMounted = false
@@ -87,34 +91,39 @@ export function DashboardPage() {
   }, [])
 
   useEffect(() => {
-    if (!selectedSubjectId) {
+    let isMounted = true
+
+    void Promise.resolve().then(() => {
+      if (!isMounted) return
+
+      if (!selectedSubjectId) {
+        setTopics([])
+        setSelectedTopicId('')
+        return
+      }
+
+      setIsLoadingTopics(true)
       setTopics([])
       setSelectedTopicId('')
-      return
-    }
+      setErrorMessage('')
 
-    let isMounted = true
-    setIsLoadingTopics(true)
-    setTopics([])
-    setSelectedTopicId('')
-    setErrorMessage('')
-
-    void fetchTopicsBySubjectId(selectedSubjectId)
-      .then((rows) => {
-        if (isMounted) {
-          setTopics(rows)
-        }
-      })
-      .catch((error: unknown) => {
-        if (isMounted) {
-          setErrorMessage(error instanceof Error ? error.message : 'Không thể tải chuyên đề.')
-        }
-      })
-      .finally(() => {
-        if (isMounted) {
-          setIsLoadingTopics(false)
-        }
-      })
+      void fetchTopicsBySubjectId(selectedSubjectId)
+        .then((rows) => {
+          if (isMounted) {
+            setTopics(rows)
+          }
+        })
+        .catch((error: unknown) => {
+          if (isMounted) {
+            setErrorMessage(error instanceof Error ? error.message : 'Không thể tải chuyên đề.')
+          }
+        })
+        .finally(() => {
+          if (isMounted) {
+            setIsLoadingTopics(false)
+          }
+        })
+    })
 
     return () => {
       isMounted = false
