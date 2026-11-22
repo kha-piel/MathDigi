@@ -63,6 +63,20 @@ it('retries the failed message without clearing a separate unsent draft', async 
   expect(document.querySelector('textarea')!.value).toBe('Bản nháp câu hỏi tiếp theo')
 })
 
+it.each([false, true])('preserves the draft when requesting a solution (stream fails: %s)', async (fails) => {
+  const context = { question_number: 1, question_content: 'Tính 1 + 1', correct_answer: '2', solution: '1 + 1 = 2' }
+  await act(async () => useTutorStore.getState().setTutorContext(context))
+  if (fails) service.streamTutor.mockRejectedValueOnce(new Error('Lỗi mạng'))
+  else service.streamTutor.mockResolvedValueOnce(undefined)
+  await typeDraft('Câu hỏi chưa gửi')
+  await click('Xem lời giải')
+  expect(service.streamTutor.mock.calls[0].slice(0, 3)).toEqual([
+    [{ role: 'user', content: 'Hãy trình bày lời giải đầy đủ cho câu hỏi này.' }], context, true,
+  ])
+  expect(document.querySelector('textarea')!.value).toBe('Câu hỏi chưa gửi')
+  await act(async () => useTutorStore.getState().clearTutorContext())
+})
+
 it.each(['textarea', 'header button', '[role="dialog"]'])('closes on Escape from %s without discarding the draft', async (selector) => {
   await typeDraft('Bản nháp')
   const target = document.querySelector<HTMLElement>(selector)!
