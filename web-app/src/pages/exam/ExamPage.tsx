@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { setTutorContext, clearTutorContext, setTutorDisabled, TUTOR_EXAM_DISABLED } from '../../features/tutor-chat/store'
+import { tutorQuestionOptions } from '../../features/tutor-chat/question-context'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { MarkdownContent } from '../../components/ui/MarkdownContent'
 import { PageCard } from '../../components/ui/PageCard'
@@ -131,7 +132,7 @@ export function ExamPage() {
     if (currentQuestion && session && runtime && (runtime.submittedAt || session.durationMinutes <= 0)) setTutorContext({
       question_number: runtime.currentIndex + 1,
       question_content: currentQuestion.content,
-      options: currentQuestion.answers.map((a) => a.content),
+      options: tutorQuestionOptions(currentQuestion),
       question_type: currentQuestion.questionType,
       topic: session.topicName,
       student_answer: formatQuestionResponse(runtime, currentQuestion),
