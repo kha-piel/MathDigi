@@ -496,12 +496,17 @@ export function ExamPage() {
           {chatStatus ? <p className="mb-4 text-sm text-slate-500">{chatStatus}</p> : null}
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-4">
             <strong className="text-sm text-slate-900">Trạng thái câu hiện tại</strong>
-            <p className="mt-2 text-sm text-slate-600">
-              {questionLocked
-                ? `Đã khóa. Đáp án của bạn: ${selectedAnswerLabel}`
-                : 'Chưa khóa, bạn vẫn có thể đổi đáp án trước khi check.'}
-            </p>
-            <p className="mt-2 text-sm text-slate-600">Đáp án đúng: {correctAnswerLabel}</p>
+            {questionLocked || isSubmitted ? (
+              <MarkdownContent
+                content={`${isSubmitted ? 'Đã nộp bài' : 'Đã khóa'}. Đáp án của bạn: ${selectedAnswerLabel}`}
+                className="mt-2 text-slate-600"
+              />
+            ) : (
+              <p className="mt-2 text-sm text-slate-600">Chưa khóa, bạn vẫn có thể đổi đáp án trước khi check.</p>
+            )}
+            {questionLocked || isSubmitted ? (
+              <MarkdownContent content={`Đáp án đúng: ${correctAnswerLabel}`} className="mt-2 text-slate-600" />
+            ) : null}
           </div>
         </section>
       </div>
