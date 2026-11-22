@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { setTutorContext, clearTutorContext, setTutorDisabled, TUTOR_EXAM_DISABLED } from '../../features/tutor-chat/store'
 import { Link, useBlocker, useParams } from 'react-router-dom'
 import { PageCard } from '../../components/ui/PageCard'
 import { MarkdownContent } from '../../components/ui/MarkdownContent'
@@ -82,6 +83,12 @@ export function SchoolExamPage() {
   const [schoolAttemptId, setSchoolAttemptId] = useState('')
   const [isConfirmSubmitOpen, setIsConfirmSubmitOpen] = useState(false)
   const startedAtRef = useRef(Date.now())
+
+  const tutorExamRunning = Boolean(exam && exam.durationMinutes > 0 && !submitted)
+  useEffect(() => {
+    setTutorDisabled(tutorExamRunning ? TUTOR_EXAM_DISABLED : null)
+    return () => setTutorDisabled(null)
+  }, [tutorExamRunning])
 
   useEffect(() => {
     let isMounted = true
@@ -443,6 +450,27 @@ export function SchoolExamPage() {
     }
     return reviewItems.find((item) => item.questionNumber === selectedReviewQuestionNumber) ?? null
   }, [reviewItems, selectedReviewQuestionNumber])
+
+  useEffect(() => {
+    const item = selectedReviewItem ?? reviewItems[0]
+    if (submitted && item) setTutorContext({
+      question_number: item.questionNumber,
+      question_content: item.questionContent,
+      options: item.options.map((option) => option.optionText),
+      topic: item.topic,
+      student_answer: item.selectedAnswer,
+      correct_answer: item.correctAnswer,
+      solution: item.explanation,
+      source: 'school_exam', exam_id: examId, attempt_id: schoolAttemptId,
+    })
+    return clearTutorContext
+  }, [selectedReviewItem, reviewItems, submitted, examId, schoolAttemptId])
+
+  function selectTutorQuestion(questionNumber: number) {
+    if (!submitted) return
+    const record = questionRecordByNumber[questionNumber]
+    setTutorContext({ question_number: questionNumber, question_content: record?.questionText ?? `Câu ${questionNumber}`, options: record?.options.map((o) => `${o.optionLabel}. ${o.optionText}`), question_type: record?.questionType, topic: record?.topic, student_answer: selectedChoices[String(questionNumber)] ?? shortAnswers[String(questionNumber)] ?? '', correct_answer: formatAnswerKeyValue(answerKeyByQuestionNumber[questionNumber] ?? ''), source: 'school_exam', exam_id: examId, attempt_id: schoolAttemptId })
+  }
 
   async function handleExplainWrongAnswer(item: ReviewItem) {
     if (!item.questionContent.trim()) {
@@ -1103,6 +1131,7 @@ export function SchoolExamPage() {
                     return (
                       <article
                         key={questionNumber}
+                        onClick={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
@@ -1161,6 +1190,7 @@ export function SchoolExamPage() {
                     return (
                       <article
                         key={questionNumber}
+                        onClick={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
@@ -1241,6 +1271,7 @@ export function SchoolExamPage() {
                     return (
                       <article
                         key={questionNumber}
+                        onClick={() => selectTutorQuestion(questionNumber)}
                         className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
                       >
                         <div className="mb-3 text-sm font-semibold text-slate-900">{displayQuestionLabel}</div>
@@ -1700,4 +1731,3 @@ const styles = {
     color: '#5d7491',
   },
 }
-

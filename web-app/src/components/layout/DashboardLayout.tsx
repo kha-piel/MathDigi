@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { TutorChatWidget } from '../../features/tutor-chat/TutorChatWidget'
 import {
   BookOpen,
   Clock3,
@@ -133,6 +134,7 @@ export function DashboardLayout() {
           <main className={isFullScreenMode ? "flex-1 bg-slate-50 px-2 py-4 sm:px-4 sm:py-6" : "flex-1 bg-slate-50 px-4 py-6 md:px-8 md:py-8"}>
             <div className={isFullScreenMode ? "mx-auto w-full max-w-[1800px]" : "mx-auto max-w-[1400px]"}>
               <Outlet />
+              <TutorChatWidget />
             </div>
           </main>
         </div>

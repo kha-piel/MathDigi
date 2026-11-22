@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { setTutorContext, clearTutorContext, setTutorDisabled, TUTOR_EXAM_DISABLED } from '../../features/tutor-chat/store'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { MarkdownContent } from '../../components/ui/MarkdownContent'
 import { PageCard } from '../../components/ui/PageCard'
@@ -125,6 +126,27 @@ export function ExamPage() {
       submittedAt: runtime.submittedAt,
     })
   }, [runtime])
+
+  useEffect(() => {
+    if (currentQuestion && session && runtime?.submittedAt) setTutorContext({
+      question_number: runtime.currentIndex + 1,
+      question_content: currentQuestion.content,
+      options: currentQuestion.answers.map((a) => a.content),
+      question_type: currentQuestion.questionType,
+      topic: session.topicName,
+      student_answer: formatQuestionResponse(runtime, currentQuestion),
+      correct_answer: formatCorrectResponse(currentQuestion),
+      solution: currentQuestion.explanation ?? '',
+      source: 'exam', exam_id: sessionId,
+    })
+    return clearTutorContext
+  }, [currentQuestion, session, runtime, sessionId])
+
+  const tutorExamRunning = Boolean(session && runtime && session.durationMinutes > 0 && !runtime.submittedAt)
+  useEffect(() => {
+    setTutorDisabled(tutorExamRunning ? TUTOR_EXAM_DISABLED : null)
+    return () => setTutorDisabled(null)
+  }, [tutorExamRunning])
 
   useEffect(() => {
     if (!authUser?.id || !session || !runtime || runtime.submittedAt || session.deliveryMode === 'local_mock') {
@@ -683,5 +705,3 @@ function formatQuestionType(question: DraftQuestion) {
 
   return 'Trả lời ngắn'
 }
-
-
