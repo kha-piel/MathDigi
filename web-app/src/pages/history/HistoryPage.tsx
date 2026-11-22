@@ -20,7 +20,10 @@ import {
   type SchoolExamAttemptHistoryItem,
 } from '../../features/practice/services/school-exam-attempt-service'
 import { useFlaggedWrongQuestionStore } from '../../features/practice/store/flagged-wrong-question-store'
+import { excludeLocallyReviewedAttempts, settleHistorySource } from '../../features/history/services/history-source'
 import { hasSupabaseEnv } from '../../lib/config/env'
+import { MarkdownContent } from '../../components/ui/MarkdownContent'
+import { normalizeSchoolExamMarkdown } from '../../features/practice/utils/school-exam-content'
 
 type HistoryTab = 'school_exams' | 'practice' | 'ai'
 
@@ -88,11 +91,17 @@ export function HistoryPage() {
           topicName: draftSession.topicName,
           difficultyLabel: draftSession.difficultyLabel,
           completedAt: runtime.submittedAt,
+          persistedAttemptId: runtime.persistedAttemptId,
         }
       })
       .filter((value) => value !== null)
       .sort((left, right) => right.completedAt - left.completedAt)
   }, [draftSessions, runtimeSessions])
+
+  const visiblePracticeHistory = useMemo(
+    () => excludeLocallyReviewedAttempts(practiceHistory, localSubmittedSessions),
+    [practiceHistory, localSubmittedSessions],
+  )
 
   const localPersistedAttemptIds = useMemo(
     () =>
@@ -114,10 +123,8 @@ export function HistoryPage() {
 
   useEffect(() => {
     let isMounted = true
-
     void Promise.resolve().then(() => {
       if (!isMounted) return
-
       if (!authUser?.id) {
         setIsLoading(false)
         return
@@ -132,21 +139,22 @@ export function HistoryPage() {
       setIsLoading(true)
       setErrorMessage('')
 
-      void Promise.all([
-        fetchSchoolExamAttemptHistory(authUser.id),
-        fetchAttemptHistory(authUser.id),
-        fetchCloudInProgressAttempts(authUser.id),
-        fetchUnifiedAiHistory(authUser.id),
+      return Promise.all([
+        settleHistorySource(fetchSchoolExamAttemptHistory(authUser.id), [], 'Đề trường'),
+        settleHistorySource(fetchAttemptHistory(authUser.id), [], 'Luyện tập'),
+        settleHistorySource(fetchCloudInProgressAttempts(authUser.id), [], 'Bài đang làm'),
+        settleHistorySource(fetchUnifiedAiHistory(authUser.id), [], 'Lịch sử AI'),
       ])
         .then(([schoolRows, practiceRows, cloudRows, aiRows]) => {
           if (!isMounted) {
             return
           }
 
-          setSchoolExamHistory(schoolRows)
-          setPracticeHistory(practiceRows)
-          setCloudInProgressAttempts(cloudRows)
-          setAiHistory(aiRows)
+          setSchoolExamHistory(schoolRows.data)
+          setPracticeHistory(practiceRows.data)
+          setCloudInProgressAttempts(cloudRows.data)
+          setAiHistory(aiRows.data)
+          setErrorMessage([schoolRows, practiceRows, cloudRows, aiRows].flatMap((row) => row.error ? [row.error] : []).join(' · '))
         })
         .catch((error: unknown) => {
           if (isMounted) {
@@ -324,7 +332,7 @@ export function HistoryPage() {
 
           <Panel>
             <SectionTitle title="Bài ôn tập đã nộp" description="Các phiên luyện tập đã lưu trong Supabase." />
-            {practiceHistory.length === 0 && localSubmittedSessions.length === 0 ? (
+            {visiblePracticeHistory.length === 0 && localSubmittedSessions.length === 0 ? (
               <EmptyState text="Chưa có bài ôn tập đã nộp." />
             ) : (
               <div className="mt-5 grid gap-4">
@@ -344,7 +352,7 @@ export function HistoryPage() {
                     </Link>
                   </article>
                 ))}
-                {practiceHistory.map((attempt) => (
+                {visiblePracticeHistory.map((attempt) => (
                   <article key={attempt.attemptId} className="rounded-[20px] border border-slate-200 bg-slate-50 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
@@ -414,7 +422,8 @@ export function HistoryPage() {
                     <div className="text-xs font-semibold text-slate-500">{formatDateTime(message.createdAt)}</div>
                   </div>
                   <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-7 text-slate-700">
-                    <strong>{formatRole(message.role)}:</strong> {message.content}
+                    <strong>{formatRole(message.role)}:</strong>
+                    <MarkdownContent content={message.content} className="text-sm leading-7 text-slate-700" />
                   </div>
                 </article>
               ))}
@@ -455,11 +464,18 @@ export function HistoryPage() {
                       {answer.isCorrect ? 'Đúng' : answer.skipped ? 'Bỏ qua' : 'Sai'}
                     </span>
                   </div>
-                  <p className="mt-2 text-sm text-slate-600">
-                    Bạn chọn: {answer.selectedAnswer || '--'} | Đáp án đúng: {answer.correctAnswer || '--'}
-                  </p>
+                  <div className="mt-2 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
+                    <div>
+                      <div className="font-semibold">Bạn chọn:</div>
+                      <MarkdownContent content={answer.selectedAnswer || '--'} />
+                    </div>
+                    <div>
+                      <div className="font-semibold">Đáp án đúng:</div>
+                      <MarkdownContent content={answer.correctAnswer || '--'} />
+                    </div>
+                  </div>
                   {answer.questionContent ? (
-                    <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-700">{answer.questionContent}</p>
+                    <MarkdownContent content={normalizeSchoolExamMarkdown(answer.questionContent)} className="mt-2 text-sm leading-6 text-slate-700" />
                   ) : null}
                 </article>
               ))}

@@ -1,5 +1,7 @@
+import { buildQuestionAssetUrls as buildAssetUrls } from '../utils/question-assets'
+import { buildBlueprintQuestions, type PracticeSelectionMode } from './practice-exam-builder'
 import { practiceBlueprints } from '../data/practice-blueprints'
-import { fetchSchoolExamQuestionBank, fetchSchoolExamQuestionSummary } from './school-exam-service'
+import { fetchSchoolExamQuestionBank, fetchSchoolExamQuestionSummary, invalidateSchoolExamCaches } from './school-exam-service'
 import { normalizeSchoolExamMarkdown } from '../utils/school-exam-content'
 import type {
   PracticeBlueprint,
@@ -16,26 +18,14 @@ type QuestionBankOverview = {
   schools: number
 }
 
-type SelectionContext = {
-  preferredSchoolName?: string
-  usedQuestionIds: Set<string>
-  perExamCount: Map<string, number>
-  perTopicCount: Map<string, number>
-}
-
 const SUBJECT_ID_TO_CODE: Record<string, string> = {
   TOAN: 'TOAN',
   VAT_LY: 'VAT_LY',
   HOA_HOC: 'HOA_HOC',
 }
 
-const SOFT_MAX_QUESTIONS_PER_SOURCE_EXAM = 3
-const SOFT_MAX_QUESTIONS_PER_TOPIC = 2
-
-const questionBankCacheBySubject = new Map<string, Promise<PracticeQuestion[]>>()
-
 export function invalidatePracticeQuestionBankCache() {
-  questionBankCacheBySubject.clear()
+  invalidateSchoolExamCaches()
 }
 
 export function searchPracticeExamCatalog(
@@ -86,6 +76,8 @@ export async function createPracticeExamSession(input: {
   subjectId: string
   subjectName: string
   preferredSchoolName?: string
+  mode?: PracticeSelectionMode
+  userId?: string
 }): Promise<ExamDraftSession> {
   const blueprint = practiceBlueprints.find((item) => item.blueprintId === input.blueprintId)
   if (!blueprint) {
@@ -93,11 +85,27 @@ export async function createPracticeExamSession(input: {
   }
 
   const questionBank = await loadPracticeQuestionBank(input.subjectId)
-  const selectedQuestions = buildBlueprintQuestions({
+  const seed = crypto.getRandomValues(new Uint32Array(1))[0]
+  const mode = input.mode ?? 'balanced'
+  const historyKey = `thptqg-mock-used:${input.userId ?? 'anonymous'}`
+  let seenQuestionIds: string[] = []
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(historyKey) ?? '[]')
+    if (Array.isArray(stored)) seenQuestionIds = stored.filter((id): id is string => typeof id === 'string')
+  } catch { /* Storage can be unavailable in private browsing. */ }
+  const { questions: selectedQuestions, warnings } = buildBlueprintQuestions({
     blueprint,
     preferredSchoolName: input.preferredSchoolName,
     questionBank,
+    seed,
+    mode,
+    seenQuestionIds: new Set(seenQuestionIds),
   })
+  try {
+    localStorage.setItem(historyKey, JSON.stringify([...new Set([
+      ...seenQuestionIds, ...selectedQuestions.map((question) => question.questionId),
+    ])]))
+  } catch { /* A full or disabled store must not prevent starting an exam. */ }
 
   const dominantLevel = resolveDominantLevel(blueprint)
   const sessionId = crypto.randomUUID()
@@ -111,9 +119,13 @@ export async function createPracticeExamSession(input: {
     topicId: 'practice-mock',
     topicName: 'Thi thử tổng hợp',
     difficultyLevel: dominantLevel,
-    difficultyLabel: 'Phan bo 4 muc theo blueprint',
+    difficultyLabel: mode === 'random' ? 'Ngẫu nhiên hoàn toàn' : 'Phân bố 4 mức theo blueprint',
     durationMinutes: blueprint.durationMinutes,
     questions: selectedQuestions,
+    seed,
+    selectionMode: mode,
+    warnings,
+    metadata: { seed, selectionMode: mode, seenQuestionIds },
     deliveryMode: 'local_mock',
     blueprintId: blueprint.blueprintId,
     createdAt: Date.now(),
@@ -121,202 +133,9 @@ export async function createPracticeExamSession(input: {
 }
 
 async function loadPracticeQuestionBank(subjectId: string): Promise<PracticeQuestion[]> {
-  const cached = questionBankCacheBySubject.get(subjectId)
-  if (cached) {
-    return cached
-  }
-
-  const pending = loadPracticeQuestionBankUncached(subjectId)
-  questionBankCacheBySubject.set(subjectId, pending)
-  try {
-    return await pending
-  } catch (error) {
-    if (questionBankCacheBySubject.get(subjectId) === pending) {
-      questionBankCacheBySubject.delete(subjectId)
-    }
-    throw error
-  }
-}
-
-async function loadPracticeQuestionBankUncached(subjectId: string): Promise<PracticeQuestion[]> {
   const subjectCode = SUBJECT_ID_TO_CODE[subjectId] ?? subjectId
   const remoteBank = await fetchSchoolExamQuestionBank(subjectCode)
-  if (remoteBank.length > 0) {
-    return remoteBank.map((question) => mapSchoolExamQuestionToPracticeQuestion(question, subjectId))
-  }
-
-  return filterQuestionBankBySubject(await loadMockQuestionBank(), subjectId)
-}
-
-async function loadMockQuestionBank() {
-  return (await import('../data/mock-question-bank')).mockQuestionBank
-}
-
-function filterQuestionBankBySubject(questionBank: PracticeQuestion[], subjectId: string) {
-  return questionBank.filter((question) => question.subjectId === subjectId)
-}
-
-function buildBlueprintQuestions(input: {
-  blueprint: PracticeBlueprint
-  preferredSchoolName?: string
-  questionBank: PracticeQuestion[]
-}) {
-  const selectionContext: SelectionContext = {
-    preferredSchoolName: input.preferredSchoolName,
-    usedQuestionIds: new Set<string>(),
-    perExamCount: new Map<string, number>(),
-    perTopicCount: new Map<string, number>(),
-  }
-
-  const assembledBySection = input.blueprint.sections.map((section) => {
-    const sectionQuestions: PracticeQuestion[] = []
-
-    for (const levelKey of [1, 2, 3, 4] as const) {
-      const neededCount = section.levelCounts[levelKey]
-      if (neededCount <= 0) {
-        continue
-      }
-
-      const picked = pickQuestionsForLevel({
-        questionBank: input.questionBank,
-        questionType: section.questionType,
-        preferredLevel: levelKey,
-        neededCount,
-        selectionContext,
-      })
-
-      if (picked.length < neededCount) {
-        throw new Error(
-          `Kho câu hỏi hien chi co ${picked.length}/${neededCount} câu ${section.questionType} cho muc ${levelKey}.`,
-        )
-      }
-
-      sectionQuestions.push(...picked)
-    }
-
-    return shuffle(sectionQuestions)
-  })
-
-  return assembledBySection.flat()
-}
-
-function pickQuestionsForLevel(input: {
-  questionBank: PracticeQuestion[]
-  questionType: PracticeQuestion['questionType']
-  preferredLevel: 1 | 2 | 3 | 4
-  neededCount: number
-  selectionContext: SelectionContext
-}) {
-  const picked: PracticeQuestion[] = []
-  const levelPriority = buildLevelPriority(input.preferredLevel)
-
-  for (const level of levelPriority) {
-    const remaining = input.neededCount - picked.length
-    if (remaining <= 0) {
-      break
-    }
-
-    const candidates = buildQuestionPool({
-      questionBank: input.questionBank,
-      questionType: input.questionType,
-      level,
-      selectionContext: input.selectionContext,
-    })
-
-    const relaxedByTopic = takeCandidates(candidates, remaining, input.selectionContext, {
-      respectExamCap: true,
-      respectTopicCap: true,
-    })
-    picked.push(...relaxedByTopic)
-
-    if (picked.length >= input.neededCount) {
-      break
-    }
-
-    const stillNeeded = input.neededCount - picked.length
-    const relaxedByExam = takeCandidates(candidates, stillNeeded, input.selectionContext, {
-      respectExamCap: false,
-      respectTopicCap: true,
-    })
-    picked.push(...relaxedByExam)
-
-    if (picked.length >= input.neededCount) {
-      break
-    }
-
-    const finalNeeded = input.neededCount - picked.length
-    const fullyRelaxed = takeCandidates(candidates, finalNeeded, input.selectionContext, {
-      respectExamCap: false,
-      respectTopicCap: false,
-    })
-    picked.push(...fullyRelaxed)
-  }
-
-  return picked
-}
-
-function buildQuestionPool(input: {
-  questionBank: PracticeQuestion[]
-  questionType: PracticeQuestion['questionType']
-  level: 1 | 2 | 3 | 4
-  selectionContext: SelectionContext
-}) {
-  const preferredSchoolName = normalize(input.selectionContext.preferredSchoolName ?? '')
-  const basePool = input.questionBank.filter(
-    (question) =>
-      question.questionType === input.questionType &&
-      question.level === input.level &&
-      !input.selectionContext.usedQuestionIds.has(question.questionId),
-  )
-
-  const prioritized = basePool.filter(
-    (question) => preferredSchoolName && normalize(question.schoolName) === preferredSchoolName,
-  )
-  const fallback = basePool.filter(
-    (question) => !preferredSchoolName || normalize(question.schoolName) !== preferredSchoolName,
-  )
-
-  return [...shuffle(prioritized), ...shuffle(fallback)]
-}
-
-function takeCandidates(
-  candidates: PracticeQuestion[],
-  neededCount: number,
-  selectionContext: SelectionContext,
-  options: {
-    respectExamCap: boolean
-    respectTopicCap: boolean
-  },
-) {
-  const selected: PracticeQuestion[] = []
-
-  for (const candidate of candidates) {
-    if (selected.length >= neededCount) {
-      break
-    }
-
-    if (selectionContext.usedQuestionIds.has(candidate.questionId)) {
-      continue
-    }
-
-    const sourceExamCount = selectionContext.perExamCount.get(candidate.sourceExamId) ?? 0
-    if (options.respectExamCap && sourceExamCount >= SOFT_MAX_QUESTIONS_PER_SOURCE_EXAM) {
-      continue
-    }
-
-    const topicKey = normalize(candidate.topicId || candidate.content.slice(0, 80))
-    const topicCount = selectionContext.perTopicCount.get(topicKey) ?? 0
-    if (options.respectTopicCap && topicCount >= SOFT_MAX_QUESTIONS_PER_TOPIC) {
-      continue
-    }
-
-    selectionContext.usedQuestionIds.add(candidate.questionId)
-    selectionContext.perExamCount.set(candidate.sourceExamId, sourceExamCount + 1)
-    selectionContext.perTopicCount.set(topicKey, topicCount + 1)
-    selected.push(candidate)
-  }
-
-  return selected
+  return remoteBank.map((question) => mapSchoolExamQuestionToPracticeQuestion(question, subjectId))
 }
 
 function mapSchoolExamQuestionToPracticeQuestion(
@@ -330,7 +149,8 @@ function mapSchoolExamQuestionToPracticeQuestion(
     subjectName: getSubjectName(subjectId),
     level: question.difficultyLevel,
     questionType: question.questionType,
-    explanation: null,
+    hasImage: question.hasImage,
+    explanation: question.solution ?? null,
     obsidianSourcePath: question.obsidianSourcePath,
     answers: question.options.map((option) => ({
       answerId: `${question.questionId}-opt-${option.optionLabel.toLowerCase()}`,
@@ -398,22 +218,6 @@ function splitAcceptedResponses(input: string) {
     .filter(Boolean)
 }
 
-function buildAssetUrls(question: Awaited<ReturnType<typeof fetchSchoolExamQuestionBank>>[number]) {
-  if (!question.pdfUrl) {
-    return []
-  }
-
-  const examSlug = question.pdfUrl.split('/').pop()?.replace(/\.pdf$/i, '') ?? ''
-  const renderableAssets = question.assets && question.assets.length > 0
-    ? question.assets
-      .filter((asset) => asset.assetType === 'figure')
-      .sort((left, right) => left.displayOrder - right.displayOrder)
-      .map((asset) => asset.assetPath)
-    : (question.assetPaths ?? []).filter((assetPath) => /_hinh\d+\./i.test(assetPath))
-
-  return renderableAssets.map((assetPath) => `/school-exam-assets/${examSlug}/${assetPath}`)
-}
-
 function buildTopicId(question: Awaited<ReturnType<typeof fetchSchoolExamQuestionBank>>[number]) {
   const sourcePath = question.obsidianSourcePath?.trim()
   if (sourcePath) {
@@ -426,26 +230,6 @@ function buildTopicId(question: Awaited<ReturnType<typeof fetchSchoolExamQuestio
   }
 
   return `school-exam/${question.questionType}`
-}
-
-function buildLevelPriority(level: 1 | 2 | 3 | 4) {
-  const sequences: Record<1 | 2 | 3 | 4, Array<1 | 2 | 3 | 4>> = {
-    1: [1, 2, 3, 4],
-    2: [2, 1, 3, 4],
-    3: [3, 4, 2, 1],
-    4: [4, 3, 2, 1],
-  }
-  return sequences[level]
-}
-
-function shuffle<T>(items: T[]) {
-  const shuffled = [...items]
-  for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1))
-    ;[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]]
-  }
-
-  return shuffled
 }
 
 function resolveDominantLevel(blueprint: PracticeBlueprint): 1 | 2 | 3 | 4 {

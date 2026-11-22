@@ -40,6 +40,7 @@ export type QuestionSourceMeta = {
 }
 
 export type DraftAnswer = {
+  metadata?: { originalLabel?: string }
   answerId: string
   optionLabel: string
   content: string

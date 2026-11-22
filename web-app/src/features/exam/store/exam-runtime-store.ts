@@ -42,7 +42,7 @@ type ExamRuntimeState = {
   markCloudSync: (
     sessionId: string,
     syncInfo: {
-      persistedExamId: string
+      persistedExamId: string | null
       persistedAttemptId: string
       persistedChatSessionId?: string | null
       syncedChatMessageCount?: number
