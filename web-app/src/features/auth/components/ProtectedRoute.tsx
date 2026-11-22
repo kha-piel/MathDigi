@@ -14,7 +14,7 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
   const user = useAuthSessionStore((state) => state.user)
 
   if (status === 'booting') {
-    return <AuthRouteLoading message="Dang khoi phuc auth session..." />
+    return <AuthRouteLoading message="Đang khôi phục phiên đăng nhập..." />
   }
 
   if (status !== 'authenticated') {
