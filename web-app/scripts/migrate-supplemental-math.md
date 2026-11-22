@@ -1,6 +1,6 @@
 # Chuyển kho câu hỏi Toán bổ sung
 
-Chạy từ `web-app/` bằng Node.js 22.18+ hoặc 24. Chạy sau khi áp dụng schema Phase 2 có `topics`, `question_bank` và `question_bank_options`.
+Chạy từ `web-app/` bằng Node.js 22.18+ hoặc 24. Chạy sau khi áp dụng schema Phase 2 có `question_bank`, `question_bank_options` và hàm `math_slugify`. Script dùng UUID môn Toán từ `subjects` và khớp chuyên đề theo `topics.subject_id` / `topic_slug`.
 
 1. Chạy dry-run và xem lỗi/mục trùng:
 

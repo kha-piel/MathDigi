@@ -12,11 +12,6 @@ function normalizeText(text) {
   return text.normalize('NFC').trim().replace(/\s+/gu, ' ')
 }
 
-function topicSlug(topic) {
-  return topic.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/đ/gu, 'd')
-    .replace(/[^a-z0-9]+/gu, '-').replace(/^-|-$/gu, '')
-}
-
 function validateQuestion(question, file) {
   const fail = (reason) => {
     throw new Error(`${file}: ${question.questionId ?? '(missing ID)'}: ${reason}`)
@@ -137,50 +132,42 @@ export function makeImportSql(rows) {
   if (exactDuplicateGroups.length) {
     throw new Error(`Resolve duplicate source questions before importing: ${JSON.stringify(exactDuplicateGroups)}`)
   }
-  const topicNames = new Map()
-  const payload = rows.map(({ question, file, wasServed }) => {
-    const slug = topicSlug(question.topic)
-    if (!slug || (topicNames.has(slug) && topicNames.get(slug) !== question.topic)) {
-      throw new Error(`Ambiguous topic slug for ${question.topic}: ${slug}`)
-    }
-    topicNames.set(slug, question.topic)
-    return {
-      question_id: question.questionId,
-      question_type: question.questionType,
-      topic: question.topic,
-      topic_slug: slug,
-      difficulty_level: question.difficultyLevel,
-      review_status: wasServed ? 'approved' : 'pending_review',
-      question_text: question.questionText,
-      correct_answer: question.answerValue,
-      source: file,
-      obsidian_source_path: question.obsidianSourcePath,
-      tags: question.tags ?? [],
-      content_hash: questionFingerprint(question),
-      options: question.options.map(({ optionLabel, optionText, displayOrder }) => ({
-        option_label: optionLabel,
-        option_text: optionText,
-        display_order: displayOrder,
-      })),
-      metadata: {
-        import_batch: 'supplemental-math-v1',
-        legacy_exam_id: question.examId,
-        legacy_exam_title: question.examTitle,
-        legacy_school_name: question.schoolName,
-        legacy_year: question.year,
-        legacy_pdf_url: question.pdfUrl,
-        legacy_question_number: question.questionNumber,
-        source_question_number: question.sourceQuestionNumber,
-        section_number: question.sourceSectionNumber,
-      },
-    }
-  })
+  const payload = rows.map(({ question, file, wasServed }) => ({
+    question_id: question.questionId,
+    question_type: question.questionType,
+    topic: question.topic,
+    difficulty_level: question.difficultyLevel,
+    review_status: wasServed ? 'approved' : 'pending_review',
+    question_text: question.questionText,
+    correct_answer: question.answerValue,
+    source: file,
+    obsidian_source_path: question.obsidianSourcePath,
+    tags: question.tags ?? [],
+    content_hash: questionFingerprint(question),
+    options: question.options.map(({ optionLabel, optionText, displayOrder }) => ({
+      option_label: optionLabel,
+      option_text: optionText,
+      display_order: displayOrder,
+    })),
+    metadata: {
+      import_batch: 'supplemental-math-v1',
+      legacy_exam_id: question.examId,
+      legacy_exam_title: question.examTitle,
+      legacy_school_name: question.schoolName,
+      legacy_year: question.year,
+      legacy_pdf_url: question.pdfUrl,
+      legacy_question_number: question.questionNumber,
+      source_question_number: question.sourceQuestionNumber,
+      section_number: question.sourceSectionNumber,
+    },
+  }))
   return `-- MathDigi supplemental backfill. Review the default audit before applying.
 BEGIN;
 
 CREATE TEMP TABLE supplemental_math_import ON COMMIT DROP AS
-SELECT * FROM jsonb_to_recordset(${quoteJson(payload)}::jsonb) AS legacy(
-  question_id text, question_type text, topic text, topic_slug text,
+SELECT legacy.*, public.math_slugify(legacy.topic) AS topic_slug
+FROM jsonb_to_recordset(${quoteJson(payload)}::jsonb) AS legacy(
+  question_id text, question_type text, topic text,
   difficulty_level integer, review_status text, question_text text, correct_answer text,
   source text, obsidian_source_path text, tags text[], content_hash text, options jsonb, metadata jsonb
 );
@@ -192,6 +179,17 @@ DECLARE
   conflict_id text;
   incoming_id text;
 BEGIN
+  IF (SELECT count(*) FROM public.subjects WHERE subject_code = 'TOAN') <> 1 THEN
+    RAISE EXCEPTION 'Expected exactly one TOAN subject; no rows imported';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM supplemental_math_import WHERE topic_slug IS NULL OR topic_slug = '')
+     OR EXISTS (
+       SELECT 1 FROM supplemental_math_import GROUP BY topic_slug HAVING count(DISTINCT topic) > 1
+     ) THEN
+    RAISE EXCEPTION 'Found an empty or ambiguous TOAN topic slug; no rows imported';
+  END IF;
+
   SELECT bank.question_id, legacy.question_id INTO conflict_id, incoming_id
   FROM public.question_bank AS bank
   JOIN supplemental_math_import AS legacy
@@ -208,9 +206,12 @@ BEGIN
 END
 $check_conflicts$;
 
-INSERT INTO public.topics (subject_code, slug, topic_name)
-SELECT DISTINCT 'TOAN', topic_slug, topic FROM supplemental_math_import
-ON CONFLICT (subject_code, slug) DO NOTHING;
+INSERT INTO public.topics (subject_id, topic_slug, topic_name)
+SELECT DISTINCT subject.subject_id, legacy.topic_slug, legacy.topic
+FROM supplemental_math_import AS legacy
+CROSS JOIN public.subjects AS subject
+WHERE subject.subject_code = 'TOAN'
+ON CONFLICT (subject_id, topic_slug) WHERE topic_slug IS NOT NULL DO NOTHING;
 
 WITH inserted AS (
   INSERT INTO public.question_bank (
@@ -222,7 +223,8 @@ WITH inserted AS (
     legacy.difficulty_level, legacy.review_status, legacy.question_text, legacy.correct_answer,
     legacy.source, legacy.obsidian_source_path, legacy.tags, legacy.content_hash, legacy.metadata
   FROM supplemental_math_import AS legacy
-  JOIN public.topics AS topics ON topics.subject_code = 'TOAN' AND topics.slug = legacy.topic_slug
+  JOIN public.subjects AS subject ON subject.subject_code = 'TOAN'
+  JOIN public.topics AS topics ON topics.subject_id = subject.subject_id AND topics.topic_slug = legacy.topic_slug
   ON CONFLICT (question_id) DO NOTHING
   RETURNING question_id
 )
