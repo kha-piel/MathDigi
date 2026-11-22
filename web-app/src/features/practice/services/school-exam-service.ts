@@ -94,6 +94,7 @@ type SchoolExamQuestionAssetRow = {
   asset_type: 'question_block' | 'figure' | 'table' | 'other'
   asset_path: string
   display_order: number
+  import_archived: boolean
 }
 
 type SchoolExamQuestionBankRow = SchoolExamQuestionRow & {
@@ -113,6 +114,14 @@ const schoolExamCatalogCache = new Map<string, Promise<PracticeExamCatalogItem[]
 const schoolExamDetailCache = new Map<string, Promise<SchoolExamPaperRecord | null>>()
 const schoolExamQuestionCache = new Map<string, Promise<SchoolExamQuestionRecord[]>>()
 const schoolExamQuestionBankCache = new Map<string, Promise<SchoolExamQuestionRecord[]>>()
+
+export function invalidateSchoolExamCaches() {
+  schoolExamCatalogCache.clear()
+  schoolExamDetailCache.clear()
+  schoolExamQuestionCache.clear()
+  schoolExamQuestionBankCache.clear()
+  schoolExamQuestionSummaryCache.clear()
+}
 const schoolExamQuestionSummaryCache = new Map<string, Promise<SchoolExamQuestionSummary[]>>()
 
 type SchoolExamQuestionSummary = {
@@ -153,7 +162,7 @@ async function fetchSchoolExamCatalogUncached(): Promise<PracticeExamCatalogItem
 
   const supabase = getSupabaseBrowserClient()
   const { data, error } = await supabase
-    .from('school_exams')
+    .from('exams')
     .select(
       'exam_id, title, school_name, city, subject_code, subject_name, year, duration_minutes, pdf_url, source_path, tags',
     )
@@ -213,9 +222,9 @@ async function fetchSchoolExamByIdUncached(examId: string): Promise<SchoolExamPa
 
   const supabase = getSupabaseBrowserClient()
   const { data, error } = await supabase
-    .from('school_exams')
+    .from('exams')
     .select(
-      'exam_id, title, school_name, city, subject_code, subject_name, year, duration_minutes, pdf_url, display_variant_code, answer_key_provided, source_path, tags, sections:school_exam_sections(section_id, part_code, title, instructions, start_question_number, end_question_number, display_order, options_per_question, statement_count)',
+      'exam_id, title, school_name, city, subject_code, subject_name, year, duration_minutes, pdf_url, display_variant_code, answer_key_provided, source_path, tags, sections:exam_sections(section_id, part_code, title, instructions, start_question_number, end_question_number, display_order, options_per_question, statement_count)',
     )
     .eq('exam_id', examId)
     .eq('is_active', true)
@@ -287,9 +296,9 @@ async function fetchSchoolExamQuestionsUncached(examId: string): Promise<SchoolE
 
   const supabase = getSupabaseBrowserClient()
   const { data, error } = await supabase
-    .from('school_exam_questions')
+    .from('questions')
     .select(
-      'question_id, exam_id, question_number, question_type, question_text, correct_answer, statement_json, topic, obsidian_source_path, has_image, metadata, options:school_exam_question_options(option_label, option_text, display_order), assets:school_exam_question_assets(asset_type, asset_path, display_order)',
+      'question_id, exam_id, question_number, difficulty_level, question_type, question_text, correct_answer, statement_json, topic, obsidian_source_path, has_image, metadata, options:question_options(option_label, option_text, display_order), assets:question_assets(asset_type, asset_path, display_order, import_archived)',
     )
     .eq('exam_id', examId)
     .order('question_number', { ascending: true })
@@ -367,9 +376,9 @@ async function fetchSchoolExamQuestionSummaryUncached(subjectId: string): Promis
 
   const supabase = getSupabaseBrowserClient()
   const { data, error } = await supabase
-    .from('school_exam_questions')
+    .from('questions')
     .select(
-      'question_type, difficulty_level, topic, metadata, exam:school_exams!inner(school_name, subject_code, is_active)',
+      'question_type, difficulty_level, topic, metadata, exam:exams!inner(school_name, subject_code, is_active)',
     )
     .eq('exam.subject_code', subjectId)
     .eq('exam.is_active', true)
@@ -411,9 +420,9 @@ async function fetchSchoolExamQuestionBankUncached(subjectId: string): Promise<S
   const supabase = getSupabaseBrowserClient()
 
   const { data, error } = await supabase
-    .from('school_exam_questions')
+    .from('questions')
     .select(
-      'question_id, exam_id, question_number, question_type, question_text, correct_answer, statement_json, topic, obsidian_source_path, has_image, metadata, options:school_exam_question_options(option_label, option_text, display_order), assets:school_exam_question_assets(asset_type, asset_path, display_order), exam:school_exams!inner(exam_id, title, school_name, year, pdf_url, tags, is_active, subject_code)',
+      'question_id, exam_id, question_number, difficulty_level, question_type, question_text, correct_answer, statement_json, topic, obsidian_source_path, has_image, metadata, options:question_options(option_label, option_text, display_order), assets:question_assets(asset_type, asset_path, display_order, import_archived), exam:exams!inner(exam_id, title, school_name, year, pdf_url, tags, is_active, subject_code)',
     )
     .eq('exam.subject_code', subjectId)
     .eq('exam.is_active', true)
@@ -489,8 +498,8 @@ async function withCacheInvalidation<T>(
 function shouldFallbackToLocalMock(message: string) {
   const normalized = message.toLowerCase()
   return (
-    normalized.includes("could not find the table 'public.school_exams'") ||
-    normalized.includes("could not find the table 'public.school_exam_questions'") ||
+    normalized.includes("could not find the table 'public.exams'") ||
+    normalized.includes("could not find the table 'public.questions'") ||
     normalized.includes('schema cache')
   )
 }
@@ -700,7 +709,8 @@ async function buildFallbackQuestionRecords(examId: string): Promise<SchoolExamQ
 function mapQuestionAssets(
   assets: SchoolExamQuestionAssetRow[] | null | undefined,
 ): SchoolExamQuestionAssetRecord[] {
-  return [...(assets ?? [])]
+  return (assets ?? [])
+    .filter((asset) => !asset.import_archived)
     .sort((left, right) => left.display_order - right.display_order)
     .map((asset) => ({
       assetType: asset.asset_type,

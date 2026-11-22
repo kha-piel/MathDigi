@@ -1,5 +1,10 @@
+import katex from 'katex'
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+
 import { env } from '../../../lib/config/env'
 import { getSupabaseBrowserClient } from '../../../lib/supabase/client'
+import { invalidateSchoolExamCaches } from '../../practice/services/school-exam-service'
+import { invalidatePracticeQuestionBankCache } from '../../practice/services/practice-service'
 
 export type AdminQuestionType = 'multiple_choice' | 'true_false' | 'short_answer'
 export type SubjectCode = 'TOAN' | 'VAT_LY' | 'HOA_HOC'
@@ -39,6 +44,7 @@ export type AdminImportStatement = {
 }
 
 export type AdminImportAsset = {
+  persistedId?: string
   assetType: 'question_block' | 'figure' | 'table' | 'other'
   assetPath: string
   pageNumber?: number | null
@@ -54,6 +60,9 @@ export type AdminImportChange = {
 }
 
 export type AdminImportQuestion = {
+  persistedId?: string
+  reviewed?: boolean
+  difficultyLevel: number | null
   questionNumber: number
   questionType: AdminQuestionType
   topic: string
@@ -77,6 +86,7 @@ export type AdminImportValidationResponse = {
 }
 
 export type ManagedImportedExam = {
+  importState: 'pending_review' | 'published' | 'unpublished' | 'undone' | null
   examId: string
   title: string
   schoolName: string
@@ -114,6 +124,7 @@ type ManagedExamQuestionRow = {
   exam_id: string
   question_number: number
   difficulty_level: number | null
+  review_status: 'draft' | 'pending_review' | 'approved' | 'rejected'
   question_type: AdminQuestionType
   question_text: string
   correct_answer: string | null
@@ -128,6 +139,8 @@ type ManagedExamQuestionRow = {
     display_order: number
   }> | null
   assets: Array<{
+    asset_id: string
+    import_archived: boolean
     asset_type: AdminImportAsset['assetType']
     asset_path: string
     display_order: number
@@ -220,6 +233,7 @@ export async function requestExamPdfValidation(input: {
   answerKeyText: string
   onStatusChange?: (message: string) => void
 }) {
+  await assertNewPdf(await fingerprintPdf(input.pdfFile, true))
   if (!env.aiApiBaseUrl) {
     throw new Error(
       'Missing VITE_AI_API_BASE_URL. Copy web-app/.env.example to web-app/.env.local before using AI exam validation.',
@@ -275,8 +289,8 @@ export async function requestExamPdfValidation(input: {
     })
 
   if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(errorText || `AI backend tra ve loi HTTP ${response.status}.`)
+    const payload: { detail?: unknown } | null = await response.json().catch(() => null)
+    throw new Error(typeof payload?.detail === 'string' ? payload.detail : `AI backend tra ve loi HTTP ${response.status}.`)
   }
 
   const payload = (await response.json()) as AdminImportValidationResponse
@@ -291,6 +305,15 @@ export function getQuestionValidationIssues(question: AdminImportQuestion) {
 
   if (!Number.isInteger(question.questionNumber) || question.questionNumber <= 0) {
     issues.push('So thu tu cau hoi phai la so nguyen duong.')
+  }
+
+  if (question.difficultyLevel === null || ![1, 2, 3, 4].includes(question.difficultyLevel)) {
+    issues.push('Chon muc do tu 1 den 4.')
+  }
+  if (!question.topic.trim()) issues.push('Chon chuyen de cho cau hoi.')
+  if ([question.questionText, ...question.options.map((item) => item.text),
+    ...question.statements.map((item) => item.text), question.correctAnswer].some(hasInvalidMath)) {
+    issues.push('Co cong thuc LaTeX khong hien thi duoc.')
   }
 
   if (question.questionType === 'multiple_choice') {
@@ -322,11 +345,23 @@ export function getQuestionValidationIssues(question: AdminImportQuestion) {
     }
   }
 
-  if (question.questionType === 'short_answer' && !question.correctAnswer.trim()) {
-    issues.push('Thieu dap an tra loi ngan.')
+  if (question.questionType === 'short_answer' && !/^[+-]?\d+(?:[.,]\d+)?(?:\s*\|\s*[+-]?\d+(?:[.,]\d+)?)*$/.test(question.correctAnswer.trim())) {
+    issues.push('Dap an tra loi ngan phai la so; dung | de tach cac dap an chap nhan.')
   }
 
   return issues
+}
+
+function hasInvalidMath(text: string) {
+  const latex = /\\\[([\s\S]*?)\\\]|\\\(([\s\S]*?)\\\)|(?<!\\)\$\$([\s\S]*?)(?<!\\)\$\$|(?<![\\$])\$([^$\n]+?)(?<!\\)\$/g
+  for (const match of text.matchAll(latex)) {
+    try {
+      katex.renderToString(match[1] ?? match[2] ?? match[3] ?? match[4], { throwOnError: true })
+    } catch {
+      return true
+    }
+  }
+  return /(?<!\\)\$|\\[()[\]]/.test(text.replace(latex, ''))
 }
 
 export function getDraftValidationIssues(input: {
@@ -363,169 +398,115 @@ export function getDraftValidationIssues(input: {
   return issues
 }
 
+async function fingerprintPdf(file: File, checkPages = false) {
+  if (file.size > 20 * 1024 * 1024) throw new Error('PDF vuot qua 20 MB.')
+  const header = await file.slice(0, 8).text()
+  if (!/^%PDF-[0-9]\.[0-9]$/.test(header)) throw new Error('Noi dung file khong phai PDF.')
+  const bytes = await file.arrayBuffer()
+  const hash = await crypto.subtle.digest('SHA-256', bytes)
+  if (checkPages) {
+    const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist')
+    GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+    const task = getDocument({ data: bytes })
+    try {
+      const doc = await task.promise.catch(() => {
+        throw new Error('PDF hong hoac bi khoa. Hay chon file PDF khac.')
+      })
+      if (doc.numPages > 30) throw new Error('PDF vuot qua 30 trang.')
+    } finally {
+      await task.destroy()
+    }
+  }
+  return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function assertNewPdf(sha256: string) {
+  const { data, error } = await getSupabaseBrowserClient().from('exams')
+    .select('exam_id').eq('import_pdf_sha256', sha256).neq('import_state', 'undone').maybeSingle()
+  if (error) throw new Error('Khong the kiem tra PDF trung lap.')
+  if (data) throw new Error(`PDF da duoc nhap vao de ${data.exam_id}.`)
+}
+
 export async function saveAdminImportedExam(input: SaveAdminImportedExamInput) {
   const supabase = getSupabaseBrowserClient()
-  const draft = input.draft
-  const examId = draft.examDraft.examId
-  const issues = getDraftValidationIssues({
-    draft,
-    pdfFile: input.pdfFile,
-  })
-
-  if (issues.length > 0) {
-    throw new Error(issues[0] ?? 'Du lieu import chua hop le.')
-  }
-
-  const { data: existingExam, error: existingExamError } = await supabase
-    .from('school_exams')
-    .select('exam_id')
-    .eq('exam_id', examId)
-    .maybeSingle<{ exam_id: string }>()
-
-  if (existingExamError) {
-    throw new Error(`Khong the kiem tra exam_id ton tai: ${existingExamError.message}`)
-  }
-
-  if (existingExam) {
-    throw new Error(`Exam ID "${examId}" da ton tai. Hay doi metadata hoac ma de truoc khi luu.`)
-  }
-
-  const uploadedPdfUrl = await uploadPdfFile(input.pdfFile, draft.examDraft.pdfStoragePath)
-  const questionsWithUploadedAssets = await uploadQuestionAssets(draft.examDraft, draft.questions)
-  const sectionRows = buildSectionRows(examId, questionsWithUploadedAssets)
-  const sectionIdByType = new Map(sectionRows.map((section) => [section.part_code, section.section_id]))
-
-  const examRow = {
-    exam_id: examId,
-    title: draft.examDraft.title,
-    school_name: draft.examDraft.schoolName,
-    city: draft.examDraft.city,
-    subject_code: draft.examDraft.subjectCode,
-    subject_name: draft.examDraft.subjectName,
-    year: draft.examDraft.year,
-    duration_minutes: draft.examDraft.durationMinutes,
-    pdf_url: uploadedPdfUrl,
-    display_variant_code: draft.examDraft.variantCode,
-    answer_key_provided: questionsWithUploadedAssets.every((question) =>
-      Boolean(question.correctAnswer.trim()),
-    ),
-    source_path: `admin-import:${input.pdfFile.name}`,
-    tags: ['admin-import', draft.examDraft.subjectCode.toLowerCase()],
-    is_active: true,
-  }
-
-  const questionRows = questionsWithUploadedAssets.map((question) => ({
-    question_id: buildQuestionId(examId, question.questionNumber),
-    exam_id: examId,
-    section_id: sectionIdByType.get(question.questionType) ?? null,
-    question_number: question.questionNumber,
-    difficulty_level: null,
-    question_type: question.questionType,
-    question_text: question.questionText.trim(),
-    correct_answer: question.correctAnswer.trim().toUpperCase(),
-    statement_json:
-      question.questionType === 'true_false'
-        ? question.statements.map((statement) => ({
-            label: statement.label,
-            text: statement.text.trim(),
-          }))
-        : [],
-    explanation: null,
-    topic: question.topic.trim() || null,
-    obsidian_source_path: null,
-    has_image: question.assets.length > 0,
-    metadata: {
-      source_question_number: question.questionNumber,
-      import_source: 'admin_pdf_dashboard',
-      review_status: 'pending_review',
-    },
-  }))
-
-  const optionRows = questionsWithUploadedAssets.flatMap((question) => {
-    if (question.questionType !== 'multiple_choice') {
-      return []
+  const { examDraft, warnings } = input.draft
+  if (!input.draft.questions.length) throw new Error('Chua co cau hoi nao de luu.')
+  const sha256 = await fingerprintPdf(input.pdfFile)
+  await assertNewPdf(sha256)
+  const attempt = crypto.randomUUID()
+  const existing = await supabase.from('exams').select('import_state')
+    .eq('exam_id', examDraft.examId).maybeSingle()
+  if (existing.error) throw new Error('Khong the kiem tra ma de.')
+  const examId = existing.data?.import_state === 'undone' ? `${examDraft.examId}-${attempt}` : examDraft.examId
+  const prefix = `${examDraft.subjectCode}/${examDraft.year}/${examId}/${attempt}`
+  const paths: string[] = []
+  const used = new Set<number>()
+  const reserved = new Set(input.draft.questions.map((question) => question.questionNumber))
+  let fallback = 1
+  const normalized = input.draft.questions.map((question) => {
+    let questionNumber = question.questionNumber
+    if (!Number.isSafeInteger(questionNumber) || questionNumber <= 0 || questionNumber > 2147483647 || used.has(questionNumber)) {
+      while (used.has(fallback) || reserved.has(fallback)) fallback++
+      question = { ...question, warnings: [...question.warnings, `Can kiem tra so cau goc: ${questionNumber}.`] }
+      questionNumber = fallback++
     }
-
-    const questionId = buildQuestionId(examId, question.questionNumber)
-    return question.options.map((option, index) => ({
-      option_id: `${questionId}-option-${option.label.toLowerCase()}`,
-      question_id: questionId,
-      option_label: option.label,
-      option_text: option.text.trim(),
-      display_order: index + 1,
-    }))
+    used.add(questionNumber)
+    return { ...question, questionNumber }
   })
 
-  const assetRows = questionsWithUploadedAssets.flatMap((question) => {
-    const questionId = buildQuestionId(examId, question.questionNumber)
-    return question.assets
-      .filter((asset) => asset.publicUrl)
-      .map((asset, index) => ({
-        asset_id: `${questionId}-asset-${index + 1}`,
-        question_id: questionId,
-        asset_type: asset.assetType,
-        asset_path: asset.publicUrl,
-        caption: asset.pageNumber ? `Trang ${asset.pageNumber}` : null,
-        display_order: index + 1,
-      }))
-  })
-
-  let hasInsertedExam = false
+  let questions: AdminImportQuestion[]
+  let commitUnknown = false
   try {
-    const { error: examError } = await supabase.from('school_exams').insert(examRow)
-    if (examError) {
-      throw new Error(`Khong the tao school_exams: ${examError.message}`)
-    }
-    hasInsertedExam = true
-
-    const { error: sectionError } = await supabase.from('school_exam_sections').insert(sectionRows)
-    if (sectionError) {
-      throw new Error(`Khong the tao school_exam_sections: ${sectionError.message}`)
-    }
-
-    const { error: questionsError } = await supabase
-      .from('school_exam_questions')
-      .insert(questionRows)
-    if (questionsError) {
-      throw new Error(`Khong the tao school_exam_questions: ${questionsError.message}`)
-    }
-
-    if (optionRows.length > 0) {
-      const { error: optionsError } = await supabase
-        .from('school_exam_question_options')
-        .insert(optionRows)
-      if (optionsError) {
-        throw new Error(`Khong the tao school_exam_question_options: ${optionsError.message}`)
+    const pdfUrl = await uploadImportObject(`${prefix}/source.pdf`, input.pdfFile, 'application/pdf', paths)
+    questions = await uploadQuestionAssets(prefix, normalized, paths)
+    const bundle = buildImportBundle(examId, questions, {
+      title: examDraft.title,
+      school_name: examDraft.schoolName,
+      city: examDraft.city,
+      subject_code: examDraft.subjectCode,
+      subject_name: examDraft.subjectName,
+      year: examDraft.year,
+      duration_minutes: examDraft.durationMinutes,
+      pdf_url: pdfUrl,
+      display_variant_code: examDraft.variantCode,
+      answer_key_provided: questions.every((question) => Boolean(question.correctAnswer.trim())),
+      source_path: `admin-import:${input.pdfFile.name}`,
+      tags: ['admin-import', examDraft.subjectCode.toLowerCase()],
+      import_attempt_id: attempt,
+      import_pdf_sha256: sha256,
+      import_warnings: warnings,
+    })
+    commitUnknown = true
+    const { error } = await supabase.rpc('save_school_exam_import', { bundle })
+    if (error) {
+      if (/^[0-9A-Z]{5}$/.test(error.code) && !error.code.startsWith('08')) {
+        commitUnknown = false
+        throw new Error(error.code === '23505' ? 'PDF hoac ma de da ton tai.' : `Khong the luu ban nhap: ${error.message}`)
       }
-    }
-
-    if (assetRows.length > 0) {
-      const { error: assetsError } = await supabase
-        .from('school_exam_question_assets')
-        .insert(assetRows)
-      if (assetsError) {
-        throw new Error(`Khong the tao school_exam_question_assets: ${assetsError.message}`)
+      const confirmed = await supabase.from('exams').select('exam_id')
+        .eq('import_attempt_id', attempt).maybeSingle()
+      if (!confirmed.data) {
+        throw new Error('Chua xac nhan duoc ket qua luu. Hay tai lai danh sach de truoc khi thu lai.')
       }
-    }
-
-    return {
-      examId,
-      questionCount: questionsWithUploadedAssets.length,
     }
   } catch (error) {
-    if (hasInsertedExam) {
-      await supabase.from('school_exams').delete().eq('exam_id', examId)
-    }
+    if (!commitUnknown) await cleanupFailedUpload(paths, error)
     throw error
+  }
+  return {
+    examId,
+    questionCount: questions.length,
+    flaggedCount: questions.filter((question) => getQuestionValidationIssues(question).length > 0).length,
+    warningCount: warnings.length + questions.reduce((count, question) => count + question.warnings.length, 0),
   }
 }
 
 export async function fetchManagedImportedExams() {
   const supabase = getSupabaseBrowserClient()
   const { data, error } = await supabase
-    .from('school_exams')
+    .from('exams')
     .select(
-      'exam_id, title, school_name, city, subject_code, subject_name, year, duration_minutes, pdf_url, display_variant_code, source_path, is_active, created_at',
+      'exam_id, title, school_name, city, subject_code, subject_name, year, duration_minutes, pdf_url, display_variant_code, source_path, is_active, import_state, created_at',
     )
     .order('created_at', { ascending: false })
     .limit(24)
@@ -546,6 +527,7 @@ export async function fetchManagedImportedExams() {
       pdfUrl: row.pdf_url,
       sourcePath: row.source_path ?? null,
       isActive: row.is_active,
+      importState: row.import_state ?? null,
       createdAt: row.created_at,
       variantCode: row.display_variant_code ?? 'DEFAULT',
     }) satisfies ManagedImportedExam)
@@ -572,7 +554,7 @@ export async function updateManagedImportedExam(input: UpdateManagedImportedExam
   }
 
   const { error: examError } = await supabase
-    .from('school_exams')
+    .from('exams')
     .update(payload)
     .eq('exam_id', input.examId)
 
@@ -585,9 +567,9 @@ export async function updateManagedImportedExam(input: UpdateManagedImportedExam
 export async function fetchManagedImportedExamDraft(examId: string) {
   const supabase = getSupabaseBrowserClient()
   const { data: examRow, error: examError } = await supabase
-    .from('school_exams')
+    .from('exams')
     .select(
-      'exam_id, title, school_name, city, subject_code, subject_name, year, duration_minutes, pdf_url, display_variant_code',
+      'exam_id, title, school_name, city, subject_code, subject_name, year, duration_minutes, pdf_url, display_variant_code, import_warnings',
     )
     .eq('exam_id', examId)
     .maybeSingle<{
@@ -601,6 +583,7 @@ export async function fetchManagedImportedExamDraft(examId: string) {
       duration_minutes: number
       pdf_url: string
       display_variant_code: string | null
+      import_warnings: string[]
     }>()
 
   if (examError) {
@@ -612,9 +595,9 @@ export async function fetchManagedImportedExamDraft(examId: string) {
   }
 
   const { data: questionRows, error: questionError } = await supabase
-    .from('school_exam_questions')
+    .from('questions')
     .select(
-      'question_id, exam_id, question_number, difficulty_level, question_type, question_text, correct_answer, statement_json, topic, obsidian_source_path, has_image, metadata, options:school_exam_question_options(option_label, option_text, display_order), assets:school_exam_question_assets(asset_type, asset_path, display_order)',
+      'question_id, exam_id, question_number, difficulty_level, review_status, question_type, question_text, correct_answer, statement_json, topic, obsidian_source_path, has_image, metadata, options:question_options(option_label, option_text, display_order), assets:question_assets(asset_id, asset_type, asset_path, display_order, import_archived)',
     )
     .eq('exam_id', examId)
     .order('question_number', { ascending: true })
@@ -626,7 +609,7 @@ export async function fetchManagedImportedExamDraft(examId: string) {
 
   return {
     isValid: true,
-    warnings: [],
+    warnings: examRow.import_warnings,
     examDraft: {
       examId: examRow.exam_id,
       title: examRow.title,
@@ -643,6 +626,9 @@ export async function fetchManagedImportedExamDraft(examId: string) {
     questions: (questionRows ?? []).map((question) =>
       normalizeQuestion(
         {
+          persistedId: question.question_id,
+          difficultyLevel: question.difficulty_level,
+          reviewed: question.review_status === 'approved',
           questionNumber: question.question_number,
           questionType: question.question_type,
           topic: question.topic ?? '',
@@ -657,9 +643,10 @@ export async function fetchManagedImportedExamDraft(examId: string) {
           })),
           correctAnswer: question.correct_answer ?? '',
           isValid: true,
-          warnings: [],
+          warnings: Array.isArray(question.metadata?.import_warnings) ? question.metadata.import_warnings : [],
           changes: [],
-          assets: (question.assets ?? []).map((asset) => ({
+          assets: (question.assets ?? []).filter((asset) => !asset.import_archived).map((asset) => ({
+            persistedId: asset.asset_id,
             assetType: asset.asset_type,
             assetPath: asset.asset_path,
             publicUrl: asset.asset_path,
@@ -676,169 +663,83 @@ export async function fetchManagedImportedExamDraft(examId: string) {
 export async function saveManagedImportedExamDraft(input: {
   draft: AdminImportValidationResponse
 }) {
-  const supabase = getSupabaseBrowserClient()
-  const draft = input.draft
-  const examId = draft.examDraft.examId
-
-  const issues = getDraftValidationIssues({
-    draft,
-    pdfFile: new File(['managed-exam'], 'managed-exam.pdf', { type: 'application/pdf' }),
-  }).filter((issue) => issue !== 'Chua co file PDF.')
-
-  if (issues.length > 0) {
-    throw new Error(issues[0] ?? 'Du lieu de thi chua hop le de cap nhat.')
-  }
-
-  const questionsWithUploadedAssets = await uploadQuestionAssets(draft.examDraft, draft.questions)
-  const sectionRows = buildSectionRows(examId, questionsWithUploadedAssets)
-  const sectionIdByType = new Map(sectionRows.map((section) => [section.part_code, section.section_id]))
-
-  const questionRows = questionsWithUploadedAssets.map((question) => ({
-    question_id: buildQuestionId(examId, question.questionNumber),
-    exam_id: examId,
-    section_id: sectionIdByType.get(question.questionType) ?? null,
-    question_number: question.questionNumber,
-    difficulty_level: null,
-    question_type: question.questionType,
-    question_text: question.questionText.trim(),
-    correct_answer: question.correctAnswer.trim().toUpperCase(),
-    statement_json:
-      question.questionType === 'true_false'
-        ? question.statements.map((statement) => ({
-            label: statement.label,
-            text: statement.text.trim(),
-          }))
-        : [],
-    explanation: null,
-    topic: question.topic.trim() || null,
-    obsidian_source_path: null,
-    has_image: question.assets.length > 0,
-    metadata: {
-      source_question_number: question.questionNumber,
-      import_source: 'admin_pdf_dashboard',
-      review_status: 'edited_after_import',
-    },
-  }))
-
-  const optionRows = questionsWithUploadedAssets.flatMap((question) => {
-    if (question.questionType !== 'multiple_choice') {
-      return []
+  const { examDraft, questions } = input.draft
+  const paths: string[] = []
+  const prefix = `${examDraft.subjectCode}/${examDraft.year}/${examDraft.examId}/${crypto.randomUUID()}`
+  let commitUnknown = false
+  try {
+    const uploadedQuestions = await uploadQuestionAssets(prefix, questions, paths)
+    const bundle = buildImportBundle(examDraft.examId, uploadedQuestions)
+    commitUnknown = true
+    const { error } = await getSupabaseBrowserClient().rpc('save_school_exam_import', { bundle, reviewing: true })
+    if (error) {
+      commitUnknown = !/^[0-9A-Z]{5}$/.test(error.code) || error.code.startsWith('08')
+      throw new Error(`Khong the xac nhan luu duyet de: ${error.message}`)
     }
-
-    const questionId = buildQuestionId(examId, question.questionNumber)
-    return question.options.map((option, index) => ({
-      option_id: `${questionId}-option-${option.label.toLowerCase()}`,
-      question_id: questionId,
-      option_label: option.label,
-      option_text: option.text.trim(),
-      display_order: index + 1,
-    }))
-  })
-
-  const assetRows = questionsWithUploadedAssets.flatMap((question) => {
-    const questionId = buildQuestionId(examId, question.questionNumber)
-    return question.assets
-      .filter((asset) => asset.publicUrl || asset.assetPath)
-      .map((asset, index) => ({
-        asset_id: `${questionId}-asset-${index + 1}`,
-        question_id: questionId,
-        asset_type: asset.assetType,
-        asset_path: asset.publicUrl ?? asset.assetPath,
-        caption: asset.pageNumber ? `Trang ${asset.pageNumber}` : null,
-        display_order: index + 1,
-      }))
-  })
-
-  const { error: examUpdateError } = await supabase
-    .from('school_exams')
-    .update({
-      title: draft.examDraft.title,
-      school_name: draft.examDraft.schoolName,
-      city: draft.examDraft.city,
-      subject_code: draft.examDraft.subjectCode,
-      subject_name: draft.examDraft.subjectName,
-      year: draft.examDraft.year,
-      duration_minutes: draft.examDraft.durationMinutes,
-      display_variant_code: draft.examDraft.variantCode || 'DEFAULT',
-      answer_key_provided: questionsWithUploadedAssets.every((question) =>
-        Boolean(question.correctAnswer.trim()),
-      ),
-    })
-    .eq('exam_id', examId)
-
-  if (examUpdateError) {
-    throw new Error(`Khong the cap nhat thong tin tong cua de: ${examUpdateError.message}`)
-  }
-
-  const { error: questionDeleteError } = await supabase
-    .from('school_exam_questions')
-    .delete()
-    .eq('exam_id', examId)
-
-  if (questionDeleteError) {
-    throw new Error(`Khong the lam moi cau hoi cu: ${questionDeleteError.message}`)
-  }
-
-  const { error: sectionDeleteError } = await supabase
-    .from('school_exam_sections')
-    .delete()
-    .eq('exam_id', examId)
-
-  if (sectionDeleteError) {
-    throw new Error(`Khong the lam moi phan de thi cu: ${sectionDeleteError.message}`)
-  }
-
-  if (sectionRows.length > 0) {
-    const { error: sectionInsertError } = await supabase.from('school_exam_sections').insert(sectionRows)
-    if (sectionInsertError) {
-      throw new Error(`Khong the luu lai cac phan de thi: ${sectionInsertError.message}`)
-    }
-  }
-
-  const { error: questionInsertError } = await supabase
-    .from('school_exam_questions')
-    .insert(questionRows)
-
-  if (questionInsertError) {
-    throw new Error(`Khong the luu cau hoi moi: ${questionInsertError.message}`)
-  }
-
-  if (optionRows.length > 0) {
-    const { error: optionInsertError } = await supabase
-      .from('school_exam_question_options')
-      .insert(optionRows)
-    if (optionInsertError) {
-      throw new Error(`Khong the luu dap an lua chon: ${optionInsertError.message}`)
-    }
-  }
-
-  if (assetRows.length > 0) {
-    const { error: assetInsertError } = await supabase
-      .from('school_exam_question_assets')
-      .insert(assetRows)
-    if (assetInsertError) {
-      throw new Error(`Khong the luu hinh anh cau hoi: ${assetInsertError.message}`)
-    }
+  } catch (error) {
+    if (!commitUnknown) await cleanupFailedUpload(paths, error)
+    throw error
   }
 }
 
-export async function deleteManagedImportedExam(input: {
-  examId: string
-  subjectCode: SubjectCode
-  year: number
-}) {
-  const supabase = getSupabaseBrowserClient()
-  const storagePrefix = `${input.subjectCode}/${input.year}/${input.examId}`
+export async function setManagedExamImportState(examId: string, state: 'published' | 'undo') {
+  const { data, error } = await getSupabaseBrowserClient().rpc('set_school_exam_import_state', {
+    target_exam_id: examId,
+    target_state: state,
+  })
+  if (error) throw new Error(`Khong the doi trang thai de thi: ${error.message}`)
+  invalidateSchoolExamCaches()
+  invalidatePracticeQuestionBankCache()
+  return data as 'published' | 'unpublished' | 'undone'
+}
 
-  try {
-    await removeStoragePrefix(storagePrefix)
-  } catch {
-    // Keep delete resilient even if some orphaned files cannot be removed from Storage.
-  }
-
-  const { error } = await supabase.from('school_exams').delete().eq('exam_id', input.examId)
-  if (error) {
-    throw new Error(`Khong the xoa de thi: ${error.message}`)
+function buildImportBundle(examId: string, questions: AdminImportQuestion[], examFields = {}) {
+  const sections = buildSectionRows(examId, questions)
+  const sectionIds = new Map(sections.map((section) => [section.part_code, section.section_id]))
+  return {
+    exam: { exam_id: examId, ...examFields },
+    sections,
+    questions: questions.map((question) => ({
+      question_id: question.persistedId ?? buildQuestionId(examId, question.questionNumber),
+      exam_id: examId,
+      section_id: sectionIds.get(question.questionType),
+      question_number: question.questionNumber,
+      difficulty_level: question.difficultyLevel,
+      question_type: question.questionType,
+      question_text: question.questionText.trim(),
+      correct_answer: question.correctAnswer.trim(),
+      statement_json: question.questionType === 'true_false' ? question.statements : [],
+      topic: question.topic.trim() || null,
+      has_image: question.assets.length > 0,
+      metadata: {
+        source_question_number: question.questionNumber,
+        import_source: 'admin_pdf_dashboard',
+        import_issues: getQuestionValidationIssues(question),
+        import_review_confirmed: question.reviewed === true,
+        import_warnings: question.warnings,
+      },
+    })),
+    options: questions.flatMap((question) => {
+      const questionId = question.persistedId ?? buildQuestionId(examId, question.questionNumber)
+      return question.options.map((option, index) => ({
+        option_id: `${questionId}-option-${option.label.toLowerCase()}`,
+        question_id: questionId,
+        option_label: option.label,
+        option_text: option.text.trim(),
+        display_order: index + 1,
+      }))
+    }),
+    assets: questions.flatMap((question) => {
+      const questionId = question.persistedId ?? buildQuestionId(examId, question.questionNumber)
+      return question.assets.filter((asset) => asset.publicUrl).map((asset, index) => ({
+        asset_id: asset.persistedId ?? `${questionId}-asset-${crypto.randomUUID()}`,
+        question_id: questionId,
+        asset_type: asset.assetType,
+        asset_path: asset.publicUrl,
+        caption: asset.pageNumber ? `Trang ${asset.pageNumber}` : null,
+        display_order: index + 1,
+      }))
+    }),
   }
 }
 
@@ -852,42 +753,7 @@ function normalizeValidationResponse(payload: AdminImportValidationResponse): Ad
   }
 }
 
-async function removeStoragePrefix(prefix: string) {
-  const supabase = getSupabaseBrowserClient()
-  const directFiles = await listStoragePaths(prefix)
-  const assetFiles = await listStoragePaths(`${prefix}/assets`)
-  const allPaths = Array.from(new Set([...directFiles, ...assetFiles]))
 
-  if (allPaths.length === 0) {
-    return
-  }
-
-  const { error } = await supabase.storage.from(STORAGE_BUCKET).remove(allPaths)
-  if (error) {
-    throw new Error(`Khong the xoa file Storage cua de thi: ${error.message}`)
-  }
-}
-
-async function listStoragePaths(prefix: string) {
-  const supabase = getSupabaseBrowserClient()
-  const normalizedPrefix = prefix.replace(/^\/+/, '').replace(/\/+$/, '')
-  const segments = normalizedPrefix.split('/')
-  const path = segments.slice(0, -1).join('/')
-  const search = segments[segments.length - 1]
-
-  const { data, error } = await supabase.storage.from(STORAGE_BUCKET).list(path, {
-    limit: 100,
-    search,
-  })
-
-  if (error) {
-    throw new Error(`Khong the doc file Storage cua de thi: ${error.message}`)
-  }
-
-  return (data ?? [])
-    .filter((item) => item.name && !item.id?.endsWith('/'))
-    .map((item) => (path ? `${path}/${item.name}` : item.name))
-}
 
 function normalizeQuestion(question: AdminImportQuestion, fallbackNumber: number): AdminImportQuestion {
   const optionMap = new Map(
@@ -910,6 +776,9 @@ function normalizeQuestion(question: AdminImportQuestion, fallbackNumber: number
     : 'multiple_choice'
 
   return {
+    persistedId: question.persistedId,
+    reviewed: question.reviewed,
+    difficultyLevel: [1, 2, 3, 4].includes(question.difficultyLevel ?? 0) ? question.difficultyLevel : null,
     questionNumber: Number(question.questionNumber) || fallbackNumber,
     questionType,
     topic: String(question.topic ?? '').trim(),
@@ -976,59 +845,39 @@ function buildSectionRows(examId: string, questions: AdminImportQuestion[]) {
     .filter((section) => section !== null)
 }
 
-async function uploadPdfFile(file: File, storagePath: string) {
-  const supabase = getSupabaseBrowserClient()
-  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(storagePath, file, {
-    cacheControl: '3600',
-    contentType: 'application/pdf',
-    upsert: true,
-  })
-
-  if (error) {
-    throw new Error(buildStorageUploadErrorMessage('PDF', error.message))
-  }
-
-  return getStoragePublicUrl(storagePath)
+async function uploadImportObject(path: string, body: Blob, contentType: string, paths: string[]) {
+  const bucket = getSupabaseBrowserClient().storage.from(STORAGE_BUCKET)
+  paths.push(path)
+  const { error } = await bucket.upload(path, body, { cacheControl: '3600', contentType, upsert: false })
+  if (error) throw new Error(buildStorageUploadErrorMessage(path, error.message))
+  return bucket.getPublicUrl(path).data.publicUrl
 }
 
-async function uploadQuestionAssets(examDraft: AdminExamDraft, questions: AdminImportQuestion[]) {
-  const supabase = getSupabaseBrowserClient()
-  const nextQuestions: AdminImportQuestion[] = []
+async function cleanupFailedUpload(paths: string[], failure: unknown) {
+  if (!paths.length) return
+  const bucket = getSupabaseBrowserClient().storage.from(STORAGE_BUCKET)
+  const { error } = await bucket.remove(paths)
+  if (error) throw new Error(`${failure instanceof Error ? failure.message : 'Luu that bai.'} Khong the don file Storage: ${error.message}`)
+}
 
+async function uploadQuestionAssets(prefix: string, questions: AdminImportQuestion[], paths: string[]) {
+  const uploaded: AdminImportQuestion[] = []
   for (const question of questions) {
-    const nextAssets: AdminImportAsset[] = []
+    const assets: AdminImportAsset[] = []
     for (const asset of question.assets) {
       if (!asset.assetDataUrl) {
-        nextAssets.push(asset)
+        assets.push(asset)
         continue
       }
-
-      const storagePath = normalizeAssetStoragePath(examDraft, asset.assetPath)
       const blob = dataUrlToBlob(asset.assetDataUrl)
-      const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(storagePath, blob, {
-        cacheControl: '3600',
-        contentType: blob.type || 'image/png',
-        upsert: true,
-      })
-
-      if (error) {
-        throw new Error(buildStorageUploadErrorMessage(`asset cau ${question.questionNumber}`, error.message))
-      }
-
-      nextAssets.push({
-        ...asset,
-        assetPath: storagePath,
-        publicUrl: getStoragePublicUrl(storagePath),
-      })
+      const name = asset.assetPath.split('/').pop()?.replace(/[^a-zA-Z0-9._-]/g, '-')
+      const assetPath = `${prefix}/assets/${crypto.randomUUID()}-${name || 'image'}`
+      const publicUrl = await uploadImportObject(assetPath, blob, blob.type || 'image/png', paths)
+      assets.push({ ...asset, assetPath, publicUrl })
     }
-
-    nextQuestions.push({
-      ...question,
-      assets: nextAssets,
-    })
+    uploaded.push({ ...question, assets })
   }
-
-  return nextQuestions
+  return uploaded
 }
 
 function buildStorageUploadErrorMessage(target: string, message: string) {
@@ -1039,24 +888,7 @@ function buildStorageUploadErrorMessage(target: string, message: string) {
   return `Khong the upload ${target} len Storage: ${message}`
 }
 
-function normalizeAssetStoragePath(examDraft: AdminExamDraft, assetPath: string) {
-  const normalizedPath = assetPath.replace(/^\/+/, '')
-  const expectedPrefix = `${examDraft.subjectCode}/${examDraft.year}/${examDraft.examId}/`
-  if (normalizedPath.startsWith(expectedPrefix)) {
-    return normalizedPath
-  }
 
-  const assetSuffix = normalizedPath.includes('/assets/')
-    ? `assets/${normalizedPath.split('/assets/').pop() ?? ''}`
-    : normalizedPath.replace(/^.*?assets\//, 'assets/')
-
-  return `${expectedPrefix}${assetSuffix}`
-}
-
-function getStoragePublicUrl(path: string) {
-  const supabase = getSupabaseBrowserClient()
-  return supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl
-}
 
 function dataUrlToBlob(dataUrl: string) {
   const [metadata, base64Data] = dataUrl.split(',')

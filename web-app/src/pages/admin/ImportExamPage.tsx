@@ -14,7 +14,7 @@ import { toast } from 'sonner'
 import { useAuthSessionStore } from '../../features/auth/store/auth-session-store'
 import {
   createEmptyMetadata,
-  deleteManagedImportedExam,
+  setManagedExamImportState,
   fetchManagedImportedExamDraft,
   fetchManagedImportedExams,
   getDraftValidationIssues,
@@ -71,6 +71,7 @@ export function ImportExamPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [validationStatus, setValidationStatus] = useState('')
   const [apiError, setApiError] = useState('')
+  const [importReport, setImportReport] = useState<Awaited<ReturnType<typeof saveAdminImportedExam>> | null>(null)
   const [result, setResult] = useState<AdminImportValidationResponse | null>(null)
   const [managedExams, setManagedExams] = useState<ManagedImportedExam[]>([])
   const [isLoadingManagedExams, setIsLoadingManagedExams] = useState(true)
@@ -83,6 +84,7 @@ export function ImportExamPage() {
   const [managedDraft, setManagedDraft] = useState<AdminImportValidationResponse | null>(null)
   const [isLoadingManagedDraft, setIsLoadingManagedDraft] = useState(false)
   const [isSavingManagedDraft, setIsSavingManagedDraft] = useState(false)
+  const [managedDraftDirty, setManagedDraftDirty] = useState(false)
 
   const draftIssues = useMemo(() => {
     return getDraftValidationIssues({
@@ -228,26 +230,20 @@ export function ImportExamPage() {
   }
 
   async function handleSave() {
-    if (!result || !pdfFile) {
-      toast.error('Can phan tich PDF truoc khi luu.')
-      return
-    }
-
-    if (draftIssues.length > 0) {
-      toast.error(draftIssues[0] ?? 'Du lieu chua hop le de luu.')
-      return
-    }
-
+    if (!result || !pdfFile || !result.questions.length) return
     try {
       setIsSaving(true)
-      const saved = await saveAdminImportedExam({
-        pdfFile,
-        draft: result,
-      })
-      toast.success(`Da luu ${saved.questionCount} cau vao exam ${saved.examId}.`)
-      void loadManagedExams()
+      setApiError('')
+      setImportReport(null)
+      const saved = await saveAdminImportedExam({ pdfFile, draft: result })
+      setImportReport(saved)
+      setResult(null)
+      setPdfFile(null)
+      toast.success(`Da luu ban nhap ${saved.questionCount} cau. Hay duyet truoc khi xuat ban.`)
+      await loadManagedExams()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Khong the luu vao Supabase.'
+      setApiError(message)
       toast.error(message)
     } finally {
       setIsSaving(false)
@@ -411,6 +407,7 @@ export function ImportExamPage() {
       setIsLoadingManagedDraft(true)
       const draft = await fetchManagedImportedExamDraft(exam.examId)
       setManagedDraft(draft)
+      setManagedDraftDirty(false)
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Khong the mo editor cau hoi cua de thi.'
@@ -475,35 +472,38 @@ export function ImportExamPage() {
     }
   }
 
-  async function handleDeleteManagedExam(exam: ManagedImportedExam) {
-    const confirmed = window.confirm(
-      `Ban co chac muon xoa de "${exam.title}"? Thao tac nay se xoa de, cau hoi va dap an lien quan.`,
-    )
-    if (!confirmed) {
-      return
-    }
-
+  async function handleArchiveManagedExam(exam: ManagedImportedExam) {
+    if (!window.confirm(`An de "${exam.title}" khoi hoc sinh? Du lieu va file duoc giu lai.`)) return
     try {
       setDeletingExamId(exam.examId)
-      await deleteManagedImportedExam({
-        examId: exam.examId,
-        subjectCode: exam.subjectCode,
-        year: exam.year,
-      })
-      toast.success('Da xoa de thi khoi he thong.')
-      if (editingExamId === exam.examId) {
-        stopEditingManagedExam()
-      }
+      const state = await setManagedExamImportState(exam.examId, 'undo')
+      toast.success(state === 'undone' ? 'Da hoan tac nhap de; du lieu duoc giu de khoi phuc.' : 'Da an de. Cac bai lam cua hoc sinh duoc giu nguyen.')
+      if (editingQuestionExamId === exam.examId) closeManagedQuestionEditor()
+      if (editingExamId === exam.examId) stopEditingManagedExam()
       await loadManagedExams()
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Khong the xoa de thi luc nay.'
-      toast.error(message)
+      toast.error(error instanceof Error ? error.message : 'Khong the an de thi luc nay.')
     } finally {
       setDeletingExamId(null)
     }
   }
 
+  async function handlePublishManagedExam(examId: string) {
+    try {
+      setIsSavingManagedDraft(true)
+      await setManagedExamImportState(examId, 'published')
+      closeManagedQuestionEditor()
+      toast.success('Da xuat ban de thi.')
+      await loadManagedExams()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Khong the xuat ban de thi.')
+    } finally {
+      setIsSavingManagedDraft(false)
+    }
+  }
+
   function updateManagedDraftQuestionField(index: number, patch: Partial<AdminImportQuestion>) {
+    setManagedDraftDirty(true)
     setManagedDraft((current) => {
       if (!current) {
         return current
@@ -515,6 +515,7 @@ export function ImportExamPage() {
           questionIndex === index
             ? {
                 ...question,
+                reviewed: false,
                 ...patch,
               }
             : question,
@@ -524,6 +525,7 @@ export function ImportExamPage() {
   }
 
   function updateManagedDraftOption(index: number, label: 'A' | 'B' | 'C' | 'D', text: string) {
+    setManagedDraftDirty(true)
     setManagedDraft((current) => {
       if (!current) {
         return current
@@ -535,6 +537,7 @@ export function ImportExamPage() {
           questionIndex === index
             ? {
                 ...question,
+                reviewed: false,
                 options: question.options.map((option) =>
                   option.label === label ? { ...option, text } : option,
                 ),
@@ -550,6 +553,7 @@ export function ImportExamPage() {
     label: AdminImportStatement['label'],
     text: string,
   ) {
+    setManagedDraftDirty(true)
     setManagedDraft((current) => {
       if (!current) {
         return current
@@ -561,6 +565,7 @@ export function ImportExamPage() {
           questionIndex === index
             ? {
                 ...question,
+                reviewed: false,
                 statements: question.statements.map((statement) =>
                   statement.label === label ? { ...statement, text } : statement,
                 ),
@@ -579,6 +584,7 @@ export function ImportExamPage() {
 
     try {
       const dataUrl = await readFileAsDataUrl(file)
+      setManagedDraftDirty(true)
       setManagedDraft((current) => {
         if (!current) {
           return current
@@ -601,6 +607,7 @@ export function ImportExamPage() {
 
             return {
               ...question,
+              reviewed: false,
               assets: [
                 ...question.assets,
                 {
@@ -621,6 +628,7 @@ export function ImportExamPage() {
   }
 
   function removeManagedDraftQuestionAsset(index: number, assetIndex: number) {
+    setManagedDraftDirty(true)
     setManagedDraft((current) => {
       if (!current) {
         return current
@@ -632,6 +640,7 @@ export function ImportExamPage() {
           questionIndex === index
             ? {
                 ...question,
+                reviewed: false,
                 assets: question.assets.filter((_, currentAssetIndex) => currentAssetIndex !== assetIndex),
               }
             : question,
@@ -645,22 +654,15 @@ export function ImportExamPage() {
       return
     }
 
-    const issues = getDraftValidationIssues({
-      draft: managedDraft,
-      pdfFile: new File(['managed-exam'], 'managed-exam.pdf', { type: 'application/pdf' }),
-    }).filter((issue) => issue !== 'Chua co file PDF.')
-
-    if (issues.length > 0) {
-      toast.error(issues[0] ?? 'Du lieu de thi chua hop le de cap nhat.')
-      return
-    }
 
     try {
       setIsSavingManagedDraft(true)
       await saveManagedImportedExamDraft({
         draft: managedDraft,
       })
-      toast.success('Da cap nhat noi dung cau hoi va dap an cua de thi.')
+      setManagedDraft(await fetchManagedImportedExamDraft(managedDraft.examDraft.examId))
+      setManagedDraftDirty(false)
+      toast.success('Da luu ket qua duyet. Sua cac cau con loi truoc khi xuat ban.')
       await loadManagedExams()
     } catch (error) {
       const message =
@@ -912,7 +914,7 @@ export function ImportExamPage() {
 
               <button
                 className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 active:translate-y-px"
-                disabled={isSaving || !result}
+                disabled={isSaving || isValidating || !result?.questions.length}
                 onClick={() => void handleSave()}
                 type="button"
               >
@@ -921,9 +923,26 @@ export function ImportExamPage() {
                 ) : (
                   <Save className="h-4 w-4" strokeWidth={1.8} />
                 )}
-                Luu vao CSDL
+                Luu ban nhap cho duyet
               </button>
             </div>
+
+            {importReport ? (
+              <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950" role="status">
+                Da luu ban nhap: {importReport.questionCount - importReport.flaggedCount} cau hop le, {importReport.warningCount} canh bao, {importReport.flaggedCount} cau can sua.
+                <button
+                  className="ml-2 font-semibold underline"
+                  onClick={() => {
+                    const exam = managedExams.find((item) => item.examId === importReport.examId)
+                    if (exam) void openManagedQuestionEditor(exam)
+                  }}
+                  disabled={!managedExams.some((exam) => exam.examId === importReport.examId)}
+                  type="button"
+                >
+                  Mo de de duyet
+                </button>
+              </div>
+            ) : null}
 
             {isValidating && validationStatus ? (
               <div className="rounded-[24px] border border-sky-200 bg-sky-50 px-4 py-4 text-sm leading-6 text-sky-800">
@@ -946,7 +965,7 @@ export function ImportExamPage() {
               form={managedForm}
               isLoading={isLoadingManagedExams}
               isSaving={isUpdatingManagedExam}
-              onDelete={handleDeleteManagedExam}
+              onDelete={handleArchiveManagedExam}
               onEdit={startEditingManagedExam}
               onEditQuestions={openManagedQuestionEditor}
               onFormChange={updateManagedFormField}
@@ -981,10 +1000,22 @@ export function ImportExamPage() {
                 onClick={() => void handleSaveManagedDraft()}
                 type="button"
               >
-                {isSavingManagedDraft ? 'Dang luu...' : 'Luu noi dung de'}
+                {isSavingManagedDraft ? 'Dang luu...' : 'Luu ket qua duyet'}
               </button>
+              {managedDraft && managedExams.some((exam) => exam.examId === editingQuestionExamId && exam.importState && !exam.isActive) ? (
+                <button
+                  className="rounded-2xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  disabled={isSavingManagedDraft || managedDraftDirty || !managedDraft.questions.length ||
+                    managedDraft.questions.some((question) => !question.reviewed || getQuestionValidationIssues(question).length > 0)}
+                  onClick={() => void handlePublishManagedExam(managedDraft.examDraft.examId)}
+                  type="button"
+                >
+                  Xuat ban de thi
+                </button>
+              ) : null}
               <button
                 className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                disabled={isSavingManagedDraft}
                 onClick={closeManagedQuestionEditor}
                 type="button"
               >
@@ -1086,7 +1117,7 @@ function PreviewEditor({
       ) : null}
 
       {draftIssues.length > 0 ? (
-        <WarningBlock items={draftIssues} title="Chua san sang luu" tone="danger" />
+        <WarningBlock items={draftIssues} title="Can sua truoc khi xuat ban" tone="danger" />
       ) : null}
 
       {result.questions.map((question, index) => {
@@ -1107,7 +1138,7 @@ function PreviewEditor({
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Badge tone={isQuestionReady ? 'success' : 'danger'}>
-                    {isQuestionReady ? 'Hop le' : 'Can sua'}
+                    {isQuestionReady ? (question.reviewed ? 'Da duyet' : 'Hop le') : 'Can sua'}
                   </Badge>
                   <Badge tone="neutral">{formatQuestionType(question.questionType)}</Badge>
                   {question.assets.length > 0 ? <Badge tone="neutral">Co hinh</Badge> : null}
@@ -1118,7 +1149,7 @@ function PreviewEditor({
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <InputField
+                {!question.persistedId ? <InputField
                   compact
                   label="So cau trong phan"
                   onChange={(value) =>
@@ -1131,15 +1162,40 @@ function PreviewEditor({
                   }
                   type="number"
                   value={String(localizedQuestionNumber)}
-                />
+                /> : null}
+                <label className="block text-sm font-semibold text-slate-900">
+                  Muc do (1–4)
+                  <select
+                    className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3"
+                    onChange={(event) => updateQuestionField(index, { difficultyLevel: Number(event.target.value) || null })}
+                    value={question.difficultyLevel ?? ''}
+                  >
+                    <option value="">Chon muc do</option>
+                    <option value="1">1 — Nhan biet</option>
+                    <option value="2">2 — Thong hieu</option>
+                    <option value="3">3 — Van dung</option>
+                    <option value="4">4 — Van dung cao</option>
+                  </select>
+                </label>
                 <AnswerField
                   onChange={(value) =>
                     updateQuestionField(index, {
-                      correctAnswer: value.toUpperCase(),
+                    correctAnswer: question.questionType === 'short_answer' ? value : value.toUpperCase(),
                     })
                   }
                   question={question}
                 />
+                {question.persistedId ? (
+                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <input
+                      checked={Boolean(question.reviewed)}
+                      disabled={!isQuestionReady}
+                      onChange={(event) => updateQuestionField(index, { reviewed: event.target.checked })}
+                      type="checkbox"
+                    />
+                    Xac nhan da duyet cau nay
+                  </label>
+                ) : null}
               </div>
 
               <label className="mt-3 block">
@@ -1378,7 +1434,7 @@ function ManagedExamPanel({
                     </div>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <Badge tone={exam.isActive ? 'success' : 'warning'}>
-                        {exam.isActive ? 'Dang hien' : 'Dang an'}
+                        {exam.importState === 'pending_review' ? 'Cho duyet' : exam.importState === 'undone' ? 'Da hoan tac nhap' : exam.isActive ? 'Da xuat ban' : 'Dang an'}
                       </Badge>
                       <Badge tone="neutral">{exam.examId}</Badge>
                     </div>
@@ -1402,18 +1458,19 @@ function ManagedExamPanel({
                     </button>
                     <button
                       className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                      disabled={exam.importState === 'published'}
                       onClick={() => void onEditQuestions(exam)}
                       type="button"
                     >
-                      Sua cau hoi
+                      {exam.importState === 'published' ? 'An de de sua' : 'Duyet / sua cau hoi'}
                     </button>
                     <button
                       className="inline-flex items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={deletingExamId === exam.examId}
+                      disabled={deletingExamId === exam.examId || exam.importState === 'undone' || exam.importState === 'unpublished'}
                       onClick={() => void onDelete(exam)}
                       type="button"
                     >
-                      {deletingExamId === exam.examId ? 'Dang xoa...' : 'Xoa de thi'}
+                      {deletingExamId === exam.examId ? 'Dang an...' : 'Hoan tac / an de'}
                     </button>
                   </div>
                 </div>
@@ -1473,6 +1530,7 @@ function ManagedExamPanel({
                               ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                               : 'border-amber-200 bg-amber-50 text-amber-700',
                           ].join(' ')}
+                          disabled={Boolean(exam.importState)}
                           onClick={() => onFormChange('isActive', !form.isActive)}
                           type="button"
                         >

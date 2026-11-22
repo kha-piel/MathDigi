@@ -1,0 +1,13 @@
+# Exam import (Phase 4)
+
+1. Check PDF signature, size (20 MB) and page count (30) in the browser and the API. Reject malformed or encrypted documents. Check a SHA-256 digest before analysis; enforce uniqueness again at commit.
+2. Extract usable PDF text first. Send image-only scans to OCR with bounded processing and retries. Split the resulting content into exam sections and questions.
+3. Report extraction warnings and flag question-level problems without blocking draft creation. Check A–D options, answers for each question format, KaTeX rendering, and an explicit difficulty from 1 to 4. Gemini can suggest a difficulty based on the problem, not its position.
+4. Upload files under a unique attempt path and create the inactive exam, sections, questions, options and assets in a single admin RPC. On a failed write, remove only files owned by that attempt.
+5. Reopen the persisted draft in the admin question editor. Fix issues and save review before publishing. Report imports and unresolved issues. Undo an untaken import by removing it from normal use and releasing its PDF fingerprint; retain its rows and files for recovery. An exam with student attempts can only be unpublished and retains its fingerprint and history.
+
+Apply `web-app/supabase/migrate_phase4_exam_import.sql` after the exam tables, student learning history, existing admin policies, and Storage bucket setup. Review status lives in question metadata and difficulty remains nullable on old rows and drafts. Only reviewed questions with valid metadata and difficulty can publish. A failed Storage cleanup is reported; if the commit is unconfirmed, retain the upload rather than risk breaking a committed draft.
+
+**Schema:** Apply Phase 2 migrations in `web-app/supabase/migrations/` before `migrate_phase4_exam_import.sql`. Phase 4 writes `questions.review_status` (`pending_review` or `approved`) and links `questions.topic_id` by the Math topic slug when it exists. It keeps imported exam questions in `questions`, not the standalone `question_bank`. The import/catalog targets the live `exams`, `exam_sections`, `questions`, `question_options`, and `question_assets` tables; undo checks `student_attempts.exam_id`. Deploy with the existing Supabase row-level security policies and active admin/teacher profiles in `user_profiles`. Do not coerce legacy rows with missing difficulties.
+
+Use `rollback_phase4_exam_import.sql` with the app rollback. It leaves exam rows and files intact. Run `python -m unittest ai_service.test_pdf_import` with the AI service dependencies installed, and run `test_phase4_exam_import.sql` on a disposable Postgres database after applying the migration to verify transaction rollback, deduplication, review/publish gating, and both undo outcomes.
