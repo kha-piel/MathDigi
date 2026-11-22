@@ -128,7 +128,7 @@ export function ExamPage() {
   }, [runtime])
 
   useEffect(() => {
-    if (currentQuestion && session && runtime?.submittedAt) setTutorContext({
+    if (currentQuestion && session && runtime && (runtime.submittedAt || session.durationMinutes <= 0)) setTutorContext({
       question_number: runtime.currentIndex + 1,
       question_content: currentQuestion.content,
       options: currentQuestion.answers.map((a) => a.content),
