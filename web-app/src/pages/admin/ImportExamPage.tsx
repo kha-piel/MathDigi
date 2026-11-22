@@ -71,7 +71,7 @@ export function ImportExamPage() {
   const [isValidating, setIsValidating] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [validationStatus, setValidationStatus] = useState('')
-  const [apiError, setApiError] = useState('')
+  const [importError, setImportError] = useState<{ stage: 'analysis' | 'save'; message: string } | null>(null)
   const [importReport, setImportReport] = useState<Awaited<ReturnType<typeof saveAdminImportedExam>> | null>(null)
   const [result, setResult] = useState<AdminImportValidationResponse | null>(null)
   const [managedExams, setManagedExams] = useState<ManagedImportedExam[]>([])
@@ -162,7 +162,7 @@ export function ImportExamPage() {
     }
 
     setPdfFile(file)
-    setApiError('')
+    setImportError(null)
     setResult(null)
     toast.success(`Đã chọn PDF: ${file.name}`)
   }
@@ -204,7 +204,7 @@ export function ImportExamPage() {
 
     try {
       setIsValidating(true)
-      setApiError('')
+      setImportError(null)
       setValidationStatus('Đang chuẩn bị tải PDF lên...')
       const payload = await requestExamPdfValidation({
         pdfFile,
@@ -223,7 +223,7 @@ export function ImportExamPage() {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Không thể phân tích PDF lúc này.'
-      setApiError(message)
+      setImportError({ stage: 'analysis', message })
       toast.error(message)
     } finally {
       setIsValidating(false)
@@ -235,7 +235,7 @@ export function ImportExamPage() {
     if (!result || !pdfFile || !result.questions.length) return
     try {
       setIsSaving(true)
-      setApiError('')
+      setImportError(null)
       setImportReport(null)
       const saved = await saveAdminImportedExam({ pdfFile, draft: result })
       setImportReport(saved)
@@ -245,7 +245,7 @@ export function ImportExamPage() {
       await loadManagedExams()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Không thể lưu vào Supabase.'
-      setApiError(message)
+      setImportError({ stage: 'save', message })
       toast.error(message)
     } finally {
       setIsSaving(false)
@@ -958,7 +958,12 @@ export function ImportExamPage() {
               </div>
             ) : null}
 
-            {apiError ? <InlineAlert message={apiError} title="Không thể phân tích PDF" /> : null}
+            {importError ? (
+              <InlineAlert
+                message={importError.message}
+                title={importError.stage === 'save' ? 'Không thể lưu đề thi' : 'Không thể phân tích PDF'}
+              />
+            ) : null}
 
             <ManagedExamPanel
               deletingExamId={deletingExamId}
