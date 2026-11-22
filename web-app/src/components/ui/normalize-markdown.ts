@@ -27,7 +27,7 @@ export function normalizeMarkdown(content: string) {
     .replace(/\\\[([\s\S]*?)\\\]/g, (_match, expression: string) => `$$${expression}$$`)
     .trim()
 
-  return normalized.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`+[^`\n]*`+|\$\$[\s\S]*?\$\$|\$[^$\n]*\$)/g)
+  return normalized.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`+[^`\n]*`+|\$\$[\s\S]*?\$\$|\$[^$]*\$)/g)
     .map((part, index) => {
       if (index % 2) return part
       let result = ''

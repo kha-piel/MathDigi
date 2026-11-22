@@ -46,6 +46,15 @@ test('normalization preserves existing math and code, including bare fractions i
   assert.equal(normalizeMarkdown(String.raw`Tỉ số \frac{3}{2} và $x$.`), String.raw`Tỉ số $\frac{3}{2}$ và $x$.`)
 })
 
+test('single-dollar math spanning a newline protects fractions from extra delimiters', () => {
+  const content = '$x+\n\\frac{3}{2}$'
+  assert.equal(normalizeMarkdown(content), content)
+  const html = renderToStaticMarkup(createElement(MarkdownContent, { content }))
+  assert.equal((html.match(/class="katex"/g) ?? []).length, 1)
+  assert.match(html, /class="mfrac"/)
+  assert.doesNotMatch(html, /katex-error/)
+})
+
 test('empty, plain and malformed content remains safe and readable', () => {
   for (const content of ['', 'Chưa chọn đáp án', String.raw`\frac{3}`, String.raw`\frac{3}{2`]) {
     assert.equal(normalizeMarkdown(content), content)
