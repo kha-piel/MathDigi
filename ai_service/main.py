@@ -575,7 +575,7 @@ def classify_topics_for_questions(
         return TopicBackfillResponse(results=[], warnings=[])
 
     prompt = build_topic_backfill_prompt(subject_code, questions)
-    raw_model_response = generate_pdf_json(prompt)
+    raw_model_response = generate_topic_backfill_json(prompt)
     payload = parse_model_json_payload(raw_model_response)
     raw_results = payload.get("results", [])
     question_ids = {question.question_id for question in questions}
@@ -743,7 +743,7 @@ Neu text thieu do co hinh/so do/bang thi giu lai phan text doc duoc, them warnin
 """.strip()
 
 
-def generate_pdf_json(contents: Any) -> str:
+def generate_topic_backfill_json(contents: str) -> str:
     try:
         response = client.models.generate_content(
             model=MODEL_NAME,
@@ -753,13 +753,35 @@ def generate_pdf_json(contents: Any) -> str:
                 temperature=0,
             ),
         )
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Loi khi goi Gemini text PDF: {exc}") from exc
+    except Exception as exc:
+        logger.warning(
+            "Gemini topic backfill failed: %s (HTTP %s)",
+            type(exc).__name__,
+            exc.code if isinstance(exc, errors.APIError) else None,
+        )
+        raise gemini_api_key_error(exc) or HTTPException(
+            status_code=502, detail="Dịch vụ AI phân loại chuyên đề hiện không khả dụng. Hãy thử lại sau."
+        ) from exc
 
     text = getattr(response, "text", None)
     if not text:
-        raise HTTPException(status_code=500, detail="Gemini khong tra ve JSON tu PDF text.")
+        raise HTTPException(status_code=502, detail="Gemini không trả về dữ liệu phân loại chuyên đề.")
     return text
+
+
+def gemini_api_key_error(exc: Exception) -> HTTPException | None:
+    if not isinstance(exc, errors.APIError) or not isinstance(exc.details, dict):
+        return None
+    provider_error = exc.details.get("error", exc.details)
+    provider_details = provider_error.get("details") if isinstance(provider_error, dict) else None
+    if isinstance(provider_details, list) and any(
+        isinstance(item, dict) and item.get("reason") == "API_KEY_INVALID" for item in provider_details
+    ):
+        return HTTPException(status_code=502, detail={
+            "code": "AI_PROVIDER_API_KEY_INVALID",
+            "message": "Gemini từ chối khóa API. Hãy liên hệ quản trị viên để kiểm tra cấu hình khóa.",
+        })
+    return None
 
 
 def retry_pdf_request(operation):
@@ -768,16 +790,9 @@ def retry_pdf_request(operation):
             return operation()
         except Exception as exc:
             status = getattr(exc, "code", None)
-            if isinstance(exc, errors.APIError) and isinstance(exc.details, dict):
-                provider_error = exc.details.get("error", exc.details)
-                provider_details = provider_error.get("details") if isinstance(provider_error, dict) else None
-                if isinstance(provider_details, list) and any(
-                    isinstance(item, dict) and item.get("reason") == "API_KEY_INVALID" for item in provider_details
-                ):
-                    raise HTTPException(status_code=502, detail={
-                        "code": "AI_PROVIDER_API_KEY_INVALID",
-                        "message": "Gemini từ chối khóa API. Hãy liên hệ quản trị viên để kiểm tra cấu hình khóa.",
-                    }) from exc
+            key_error = gemini_api_key_error(exc)
+            if key_error is not None:
+                raise key_error from exc
             transient = status in {408, 429, 500, 502, 503, 504} or isinstance(exc, (TimeoutError, OSError))
             if transient and attempt < 2:
                 time.sleep(2 ** attempt)
@@ -1517,7 +1532,7 @@ async def validate_exam_pdf(
 async def backfill_school_exam_topics(request: TopicBackfillRequest):
     subject_code = request.subject_code.strip().upper()
     if subject_code not in IMPORT_TOPIC_OPTIONS_BY_SUBJECT:
-        raise HTTPException(status_code=400, detail="Subject code khong hop le cho backfill topic.")
+        raise HTTPException(status_code=400, detail="Môn học không hợp lệ để phân loại chuyên đề.")
 
     response = classify_topics_for_questions(subject_code, request.questions)
     return response.model_dump(by_alias=True)

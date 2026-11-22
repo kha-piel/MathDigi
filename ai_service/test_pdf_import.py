@@ -154,6 +154,25 @@ class PdfImportTests(unittest.IsolatedAsyncioTestCase):
             "message": "Gemini từ chối khóa API. Hãy liên hệ quản trị viên để kiểm tra cấu hình khóa.",
         })
 
+    async def test_topic_backfill_does_not_expose_provider_diagnostics(self):
+        provider_error = ClientError(400, {"error": {"message": "raw provider diagnostics"}})
+        request = {"subjectCode": "TOAN", "questions": [{
+            "questionId": "sample", "questionNumber": 1,
+            "questionType": "short_answer", "questionText": "Find x.",
+        }]}
+        endpoint = "/api/admin/backfill-school-exam-topics"
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://testserver") as api:
+            with patch.object(main.client.models, "generate_content", side_effect=provider_error), self.assertLogs(main.logger) as logs:
+                failed = await api.post(endpoint, json=request)
+            with patch.object(main.client.models, "generate_content", return_value=SimpleNamespace(text=None)):
+                empty = await api.post(endpoint, json=request)
+        self.assertEqual(failed.status_code, 502)
+        self.assertEqual(failed.json()["detail"], "Dịch vụ AI phân loại chuyên đề hiện không khả dụng. Hãy thử lại sau.")
+        self.assertIn("ClientError (HTTP 400)", "\n".join(logs.output))
+        self.assertNotIn("raw provider diagnostics", "\n".join(logs.output))
+        self.assertEqual(empty.status_code, 502)
+        self.assertEqual(empty.json()["detail"], "Gemini không trả về dữ liệu phân loại chuyên đề.")
+
     async def test_sample_scan_keeps_invalid_questions_and_does_not_infer_difficulty(self):
         payload = '{"questions":[{"questionNumber":1,"questionType":"multiple_choice","difficultyLevel":4,"questionText":"Test"},{"questionNumber":2,"questionType":"short_answer","questionText":"Test"}]}'
         ocr_file = SimpleNamespace(name="files/sample", state=SimpleNamespace(name="ACTIVE"))
