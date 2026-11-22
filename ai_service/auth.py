@@ -1,15 +1,22 @@
 import os
+from pathlib import Path
 
 import httpx
+from dotenv import dotenv_values
 from fastapi import Depends, Header, HTTPException
 
 ADMIN_ROLES = {"admin", "teacher"}
 AUTH_TIMEOUT_SECONDS = 10
 
 
+WEB_APP_ENV_FILE = Path(__file__).resolve().parent.parent / "web-app" / ".env.local"
+
+
 def _supabase_config() -> tuple[str, str]:
-    url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
-    anon_key = os.getenv("SUPABASE_ANON_KEY") or ""
+    # Local dev fallback: reuse the public Supabase URL/anon key the web app already has.
+    web_env = dotenv_values(WEB_APP_ENV_FILE) if WEB_APP_ENV_FILE.is_file() else {}
+    url = (os.getenv("SUPABASE_URL") or web_env.get("VITE_SUPABASE_URL") or "").rstrip("/")
+    anon_key = os.getenv("SUPABASE_ANON_KEY") or web_env.get("VITE_SUPABASE_ANON_KEY") or ""
     if not url or not anon_key:
         raise HTTPException(
             status_code=503,
