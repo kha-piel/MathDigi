@@ -815,7 +815,7 @@ export function SchoolExamPage() {
                   </h2>
                 </div>
                 <button
-                  aria-label="Dong tab review"
+                  aria-label="Đóng tab review"
                   className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                   onClick={() => {
                     setSelectedReviewQuestionNumber(null)
