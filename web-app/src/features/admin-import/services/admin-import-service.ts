@@ -590,15 +590,23 @@ export async function updateManagedImportedExam(input: UpdateManagedImportedExam
     is_active: input.isActive,
   }
 
-  const { error: examError } = await supabase
-    .from('exams')
-    .update(payload)
-    .eq('exam_id', input.examId)
-
-  if (examError) {
-    throw new Error(`Không thể cập nhật thông tin đề thi: ${examError.message}`)
+  const updatedExam = await runImportSaveOperation(
+    'exam info update',
+    'Không thể cập nhật thông tin đề thi lúc này. Vui lòng thử lại.',
+    async () => {
+      const { data, error } = await supabase
+        .from('exams')
+        .update(payload)
+        .eq('exam_id', input.examId)
+        .select('exam_id')
+        .maybeSingle()
+      if (error) throw error
+      return data
+    },
+  )
+  if (!updatedExam) {
+    throw new Error('Bạn không có quyền sửa hoặc đề thi không còn tồn tại.')
   }
-
 }
 
 export async function fetchManagedImportedExamDraft(examId: string) {
