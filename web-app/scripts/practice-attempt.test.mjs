@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { buildPracticeAnswerRows, buildPracticeAttemptRow, isMissingHistoryTable, isPracticeAttempt, isSchoolAttempt, practiceKindFilter, schoolAttemptMetadata, schoolExamFilter, schoolKindFilter } from '../src/features/exam/core/practice-attempt.ts'
 import { createExamRuntimeSession, getRemainingSeconds } from '../src/features/exam/core/exam-session.ts'
-import { settleHistorySource } from '../src/features/history/services/history-source.ts'
+import { excludeLocallyReviewedAttempts, settleHistorySource } from '../src/features/history/services/history-source.ts'
 
 function fixture() {
   const session = {
@@ -131,6 +131,16 @@ test('a failed history source does not discard successful or empty sources', asy
   ])
   assert.deepEqual(sources.map((source) => source.data), [['school'], [], []])
   assert.deepEqual(sources.map((source) => source.error), [null, 'Luyện tập: RLS', null])
+})
+
+test('saved local submissions suppress only their corresponding cloud duplicate', () => {
+  const cloud = [{ attemptId: 'saved' }, { attemptId: 'other-device' }]
+  const local = [{ sessionId: 'local', persistedAttemptId: 'saved' }]
+  assert.deepEqual(excludeLocallyReviewedAttempts(cloud, local), [{ attemptId: 'other-device' }])
+  assert.deepEqual(excludeLocallyReviewedAttempts(cloud, []), cloud)
+  assert.deepEqual(excludeLocallyReviewedAttempts([], local), [])
+  assert.deepEqual(excludeLocallyReviewedAttempts(cloud, [{ persistedAttemptId: null }]), cloud)
+  assert.deepEqual(local, [{ sessionId: 'local', persistedAttemptId: 'saved' }])
 })
 
 test('missing-table handling is limited to absent schema/relationships', () => {

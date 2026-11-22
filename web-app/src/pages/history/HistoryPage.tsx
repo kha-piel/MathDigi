@@ -20,7 +20,7 @@ import {
   type SchoolExamAttemptHistoryItem,
 } from '../../features/practice/services/school-exam-attempt-service'
 import { useFlaggedWrongQuestionStore } from '../../features/practice/store/flagged-wrong-question-store'
-import { settleHistorySource } from '../../features/history/services/history-source'
+import { excludeLocallyReviewedAttempts, settleHistorySource } from '../../features/history/services/history-source'
 import { hasSupabaseEnv } from '../../lib/config/env'
 import { MarkdownContent } from '../../components/ui/MarkdownContent'
 import { normalizeSchoolExamMarkdown } from '../../features/practice/utils/school-exam-content'
@@ -91,11 +91,17 @@ export function HistoryPage() {
           topicName: draftSession.topicName,
           difficultyLabel: draftSession.difficultyLabel,
           completedAt: runtime.submittedAt,
+          persistedAttemptId: runtime.persistedAttemptId,
         }
       })
       .filter((value) => value !== null)
       .sort((left, right) => right.completedAt - left.completedAt)
   }, [draftSessions, runtimeSessions])
+
+  const visiblePracticeHistory = useMemo(
+    () => excludeLocallyReviewedAttempts(practiceHistory, localSubmittedSessions),
+    [practiceHistory, localSubmittedSessions],
+  )
 
   const localPersistedAttemptIds = useMemo(
     () =>
@@ -326,7 +332,7 @@ export function HistoryPage() {
 
           <Panel>
             <SectionTitle title="Bài ôn tập đã nộp" description="Các phiên luyện tập đã lưu trong Supabase." />
-            {practiceHistory.length === 0 && localSubmittedSessions.length === 0 ? (
+            {visiblePracticeHistory.length === 0 && localSubmittedSessions.length === 0 ? (
               <EmptyState text="Chưa có bài ôn tập đã nộp." />
             ) : (
               <div className="mt-5 grid gap-4">
@@ -346,7 +352,7 @@ export function HistoryPage() {
                     </Link>
                   </article>
                 ))}
-                {practiceHistory.map((attempt) => (
+                {visiblePracticeHistory.map((attempt) => (
                   <article key={attempt.attemptId} className="rounded-[20px] border border-slate-200 bg-slate-50 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
