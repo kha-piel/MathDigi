@@ -82,7 +82,7 @@ function UserTutorChat({ userId }: { userId: string }) {
   }
 
   return <div className="fixed bottom-4 right-4 z-40">
-    {open && <section role="dialog" aria-label="Gia sư Toán" className="fixed inset-2 flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:inset-auto sm:bottom-20 sm:right-4 sm:h-[560px] sm:max-h-[85dvh] sm:w-[380px]">
+    {open && <section role="dialog" aria-label="Gia sư Toán" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false) } }} className="fixed inset-2 flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:inset-auto sm:bottom-20 sm:right-4 sm:h-[560px] sm:max-h-[85dvh] sm:w-[380px]">
       <header className="flex items-center justify-between bg-indigo-700 px-4 py-3 text-white">
         <h2 className="font-bold">Gia sư Toán</h2>
         <div className="flex items-center gap-3"><button type="button" className="text-xs underline disabled:opacity-50" disabled={busy || !loaded} onClick={() => void clear()}>Xóa lịch sử</button><button type="button" aria-label="Đóng gia sư" onClick={() => setOpen(false)}><X size={20} /></button></div>

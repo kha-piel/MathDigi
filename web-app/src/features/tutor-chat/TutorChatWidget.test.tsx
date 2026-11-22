@@ -63,6 +63,17 @@ it('retries the failed message without clearing a separate unsent draft', async 
   expect(document.querySelector('textarea')!.value).toBe('Bản nháp câu hỏi tiếp theo')
 })
 
+it.each(['textarea', 'header button', '[role="dialog"]'])('closes on Escape from %s without discarding the draft', async (selector) => {
+  await typeDraft('Bản nháp')
+  const target = document.querySelector<HTMLElement>(selector)!
+  target.focus()
+  await act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(document.querySelector('[aria-label="Mở gia sư Toán"]')?.getAttribute('aria-expanded')).toBe('false')
+  await click('Mở gia sư Toán')
+  expect(document.querySelector('textarea')!.value).toBe('Bản nháp')
+})
+
 it('mounts the fixed launcher outside the page layout', () => {
   const launcher = document.querySelector('[aria-label="Đóng gia sư Toán"]')!
   expect(container.contains(launcher)).toBe(false)
