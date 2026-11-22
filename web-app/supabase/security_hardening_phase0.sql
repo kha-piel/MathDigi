@@ -138,15 +138,16 @@ end;
 $$;
 
 -- exams: students may also create/edit their own custom practice exams (exam-attempt-service.ts).
+-- Custom exams are private to their creator; every other exam stays readable by everyone.
 select pg_temp.phase0_secure_table('exams', array['created_by', 'exam_type'], null, array[
-  'create policy phase0_read_all on public.%I for select using (true)',
+  'create policy phase0_read on public.%I for select using (exam_type is distinct from ''custom'' or created_by = auth.uid() or public.current_user_is_school_exam_admin())',
   'create policy phase0_insert on public.%I for insert to authenticated with check (public.current_user_is_school_exam_admin() or (created_by = auth.uid() and exam_type = ''custom''))',
   'create policy phase0_update on public.%I for update to authenticated using (public.current_user_is_school_exam_admin() or (created_by = auth.uid() and exam_type = ''custom'')) with check (public.current_user_is_school_exam_admin() or (created_by = auth.uid() and exam_type = ''custom''))',
   'create policy phase0_delete on public.%I for delete to authenticated using (public.current_user_is_school_exam_admin() or (created_by = auth.uid() and exam_type = ''custom''))'
 ]);
 
 select pg_temp.phase0_secure_table('exam_questions', array['exam_id'], 'exams', array[
-  'create policy phase0_read_all on public.%I for select using (true)',
+  'create policy phase0_read on public.%I for select using (public.current_user_is_school_exam_admin() or exists (select 1 from public.exams e where e.exam_id = exam_questions.exam_id and (e.exam_type is distinct from ''custom'' or e.created_by = auth.uid())))',
   'create policy phase0_insert on public.%I for insert to authenticated with check (public.current_user_is_school_exam_admin() or exists (select 1 from public.exams e where e.exam_id = exam_questions.exam_id and e.created_by = auth.uid() and e.exam_type = ''custom''))',
   'create policy phase0_update on public.%I for update to authenticated using (public.current_user_is_school_exam_admin() or exists (select 1 from public.exams e where e.exam_id = exam_questions.exam_id and e.created_by = auth.uid() and e.exam_type = ''custom'')) with check (public.current_user_is_school_exam_admin() or exists (select 1 from public.exams e where e.exam_id = exam_questions.exam_id and e.created_by = auth.uid() and e.exam_type = ''custom''))',
   'create policy phase0_delete on public.%I for delete to authenticated using (public.current_user_is_school_exam_admin() or exists (select 1 from public.exams e where e.exam_id = exam_questions.exam_id and e.created_by = auth.uid() and e.exam_type = ''custom''))'
