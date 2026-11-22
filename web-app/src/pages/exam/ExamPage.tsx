@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { setTutorContext, clearTutorContext, setTutorDisabled, TUTOR_EXAM_DISABLED } from '../../features/tutor-chat/store'
+import { tutorQuestionOptions } from '../../features/tutor-chat/question-context'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { MarkdownContent } from '../../components/ui/MarkdownContent'
 import { PageCard } from '../../components/ui/PageCard'
@@ -125,6 +127,27 @@ export function ExamPage() {
       submittedAt: runtime.submittedAt,
     })
   }, [runtime])
+
+  useEffect(() => {
+    if (currentQuestion && session && runtime && (runtime.submittedAt || session.durationMinutes <= 0)) setTutorContext({
+      question_number: runtime.currentIndex + 1,
+      question_content: currentQuestion.content,
+      options: tutorQuestionOptions(currentQuestion),
+      question_type: currentQuestion.questionType,
+      topic: session.topicName,
+      student_answer: formatQuestionResponse(runtime, currentQuestion),
+      correct_answer: formatCorrectResponse(currentQuestion),
+      solution: currentQuestion.explanation ?? '',
+      source: 'exam', exam_id: sessionId,
+    })
+    return clearTutorContext
+  }, [currentQuestion, session, runtime, sessionId])
+
+  const tutorExamRunning = Boolean(session && runtime && session.durationMinutes > 0 && !runtime.submittedAt)
+  useEffect(() => {
+    setTutorDisabled(tutorExamRunning ? TUTOR_EXAM_DISABLED : null)
+    return () => setTutorDisabled(null)
+  }, [tutorExamRunning])
 
   useEffect(() => {
     if (!authUser?.id || !session || !runtime || runtime.submittedAt || session.deliveryMode === 'local_mock') {
@@ -307,7 +330,7 @@ export function ExamPage() {
   }
 
   async function handleSendChat() {
-    if (isSubmitted) {
+    if (isSubmitted || tutorExamRunning) {
       return
     }
 
@@ -443,6 +466,7 @@ export function ExamPage() {
         </section>
 
         <section className="flex min-h-[320px] flex-col rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm md:p-6 lg:p-8">
+          {!tutorExamRunning && <>
           <h3 className="m-0 mb-2 text-xl font-bold text-slate-900">AI Chat</h3>
           <p className="m-0 text-sm text-slate-500">Lịch sử chat được giữ xuyên suốt trong exam session hiện tại.</p>
           <div className="my-4 grid max-h-[320px] gap-3 overflow-y-auto pr-1">
@@ -494,14 +518,20 @@ export function ExamPage() {
             </button>
           </div>
           {chatStatus ? <p className="mb-4 text-sm text-slate-500">{chatStatus}</p> : null}
+          </>}
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-4">
             <strong className="text-sm text-slate-900">Trạng thái câu hiện tại</strong>
-            <p className="mt-2 text-sm text-slate-600">
-              {questionLocked
-                ? `Đã khóa. Đáp án của bạn: ${selectedAnswerLabel}`
-                : 'Chưa khóa, bạn vẫn có thể đổi đáp án trước khi check.'}
-            </p>
-            <p className="mt-2 text-sm text-slate-600">Đáp án đúng: {correctAnswerLabel}</p>
+            {questionLocked || isSubmitted ? (
+              <MarkdownContent
+                content={`${isSubmitted ? 'Đã nộp bài' : 'Đã khóa'}. Đáp án của bạn: ${selectedAnswerLabel}`}
+                className="mt-2 text-slate-600"
+              />
+            ) : (
+              <p className="mt-2 text-sm text-slate-600">Chưa khóa, bạn vẫn có thể đổi đáp án trước khi check.</p>
+            )}
+            {questionLocked || isSubmitted ? (
+              <MarkdownContent content={`Đáp án đúng: ${correctAnswerLabel}`} className="mt-2 text-slate-600" />
+            ) : null}
           </div>
         </section>
       </div>
@@ -683,5 +713,3 @@ function formatQuestionType(question: DraftQuestion) {
 
   return 'Trả lời ngắn'
 }
-
-

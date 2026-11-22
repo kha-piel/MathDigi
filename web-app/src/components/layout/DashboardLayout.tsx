@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { TutorChatWidget } from '../../features/tutor-chat/TutorChatWidget'
 import {
   BookOpen,
   Clock3,
@@ -23,25 +24,25 @@ type NavigationItem = {
 
 const baseNavigationItems: NavigationItem[] = [
   {
-    label: 'Lam de thi thu',
+    label: 'Làm đề thi thử',
     to: '/practice',
     icon: FileText,
     match: ['/practice'],
   },
   {
-    label: 'On tap kien thuc',
+    label: 'Ôn tập kiến thức',
     to: '/dashboard',
     icon: BookOpen,
     match: ['/dashboard', '/exam', '/review'],
   },
   {
-    label: 'Lich su lam bai',
+    label: 'Lịch sử làm bài',
     to: '/history',
     icon: Clock3,
     match: ['/history'],
   },
   {
-    label: 'Ho so hoc sinh',
+    label: 'Hồ sơ học sinh',
     to: '/profile',
     icon: User,
     match: ['/profile', '/home'],
@@ -62,7 +63,7 @@ export function DashboardLayout() {
       await logout()
       navigate('/login', { replace: true })
     } catch (error) {
-      setLogoutError(error instanceof Error ? error.message : 'Dang xuat that bai.')
+      setLogoutError(error instanceof Error ? error.message : 'Đăng xuất thất bại.')
     }
   }
 
@@ -79,12 +80,12 @@ export function DashboardLayout() {
               navigationItems={navigationItems}
               onNavigate={() => setIsMobileMenuOpen(false)}
               onLogout={handleLogout}
-              userLabel={user?.fullName || user?.username || user?.email || 'Hoc sinh'}
+              userLabel={user?.fullName || user?.username || user?.email || 'Học sinh'}
             />
           </aside>
         )}
 
-        <div className="flex min-h-[100dvh] flex-1 flex-col">
+        <div className="flex min-h-[100dvh] min-w-0 flex-1 flex-col">
           {!isFullScreenMode && (
             <header className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur md:hidden">
               <NavLink
@@ -95,7 +96,7 @@ export function DashboardLayout() {
             </NavLink>
 
             <button
-              aria-label={isMobileMenuOpen ? 'Dong menu' : 'Mo menu'}
+              aria-label={isMobileMenuOpen ? 'Đóng menu' : 'Mở menu'}
               className="rounded-2xl border border-slate-200 bg-slate-50 p-2 text-slate-700 transition active:scale-[0.98]"
               onClick={() => setIsMobileMenuOpen((value) => !value)}
               type="button"
@@ -133,6 +134,7 @@ export function DashboardLayout() {
           <main className={isFullScreenMode ? "flex-1 bg-slate-50 px-2 py-4 sm:px-4 sm:py-6" : "flex-1 bg-slate-50 px-4 py-6 md:px-8 md:py-8"}>
             <div className={isFullScreenMode ? "mx-auto w-full max-w-[1800px]" : "mx-auto max-w-[1400px]"}>
               <Outlet />
+              <TutorChatWidget />
             </div>
           </main>
         </div>
@@ -232,7 +234,7 @@ function getNavigationItems(userRole?: string) {
 
   if (normalizedRole === 'admin' || normalizedRole === 'teacher') {
     items.push({
-      label: 'Nhap de thi',
+      label: 'Nhập đề thi',
       to: '/admin/import-exam',
       icon: Shield,
       match: ['/admin'],

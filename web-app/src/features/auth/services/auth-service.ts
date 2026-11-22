@@ -34,8 +34,6 @@ type UserProfileRow = {
 const profileSelect =
   'user_id, username, email, full_name, role, status, school_name, province_city, class_name, phone_number, thptqg_exam_year, admission_combo, target_score, target_university, target_major, study_note'
 
-const localDevelopmentAdminEmails = new Set(['admin@local.test'])
-
 export async function loginWithEmail(email: string, password: string) {
   const supabase = getSupabaseBrowserClient()
   const { error } = await supabase.auth.signInWithPassword({
@@ -305,8 +303,6 @@ async function ensureProfile(input: {
 
 function buildFallbackSummary(user: User): AuthUserSummary {
   const email = user.email ?? ''
-  const normalizedEmail = normalizeEmail(email)
-  const isLocalDevelopmentAdmin = localDevelopmentAdminEmails.has(normalizedEmail)
 
   return {
     id: user.id,
@@ -317,13 +313,18 @@ function buildFallbackSummary(user: User): AuthUserSummary {
       readStringMetadata(user, 'name') ??
       email ??
       '',
-    role: readStringMetadata(user, 'role') ?? (isLocalDevelopmentAdmin ? 'admin' : undefined),
-    status: readStringMetadata(user, 'status') ?? (isLocalDevelopmentAdmin ? 'active' : undefined),
+    role: readStringAppMetadata(user, 'role'),
+    status: readStringAppMetadata(user, 'status'),
   }
 }
 
 function readStringMetadata(user: User, key: string) {
   const value = user.user_metadata?.[key]
+  return typeof value === 'string' ? value : undefined
+}
+
+function readStringAppMetadata(user: User, key: string) {
+  const value = user.app_metadata?.[key]
   return typeof value === 'string' ? value : undefined
 }
 
