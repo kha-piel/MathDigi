@@ -151,6 +151,7 @@ type SectionPart = AdminQuestionType
 
 const STORAGE_BUCKET = 'school-exams'
 const PDF_MIME_TYPE = 'application/pdf'
+const SAVE_UNCONFIRMED_MESSAGE = 'Chưa xác nhận được kết quả lưu. Hãy tải lại danh sách đề trước khi thử lại.'
 
 export const subjectOptions: Array<{
   code: SubjectCode
@@ -502,20 +503,29 @@ export async function saveAdminImportedExam(input: SaveAdminImportedExamInput) {
       import_warnings: warnings,
     })
     commitUnknown = true
-    const { error } = await supabase.rpc('save_school_exam_import', { bundle })
+    const { error } = await runImportSaveOperation('RPC', SAVE_UNCONFIRMED_MESSAGE, () =>
+      supabase.rpc('save_school_exam_import', { bundle }),
+    )
     if (error) {
-      if (/^[0-9A-Z]{5}$/.test(error.code) && !error.code.startsWith('08')) {
+      console.error('Exam import save RPC failed:', error)
+      if (isDefiniteImportSaveFailure(error.code)) {
         commitUnknown = false
-        throw new Error(error.code === '23505' ? 'PDF hoặc mã đề đã tồn tại.' : `Không thể lưu bản nháp: ${error.message}`)
+        throw new Error(error.code === '23505'
+          ? 'PDF hoặc mã đề đã tồn tại.'
+          : 'Không thể lưu bản nháp đề thi. Hãy thử lại hoặc liên hệ quản trị viên.')
       }
-      const confirmed = await supabase.from('exams').select('exam_id')
-        .eq('import_attempt_id', attempt).maybeSingle()
+      const confirmed = await runImportSaveOperation('confirmation', SAVE_UNCONFIRMED_MESSAGE, async () => {
+        const result = await supabase.from('exams').select('exam_id')
+          .eq('import_attempt_id', attempt).maybeSingle()
+        if (result.error) throw result.error
+        return result
+      })
       if (!confirmed.data) {
-        throw new Error('Chưa xác nhận được kết quả lưu. Hãy tải lại danh sách đề trước khi thử lại.')
+        throw new Error(SAVE_UNCONFIRMED_MESSAGE)
       }
     }
   } catch (error) {
-    if (!commitUnknown) await cleanupFailedUpload(paths, error)
+    if (!commitUnknown) await cleanupFailedUpload(paths)
     throw error
   }
   return {
@@ -696,13 +706,18 @@ export async function saveManagedImportedExamDraft(input: {
     const uploadedQuestions = await uploadQuestionAssets(prefix, questions, paths)
     const bundle = buildImportBundle(examDraft.examId, uploadedQuestions)
     commitUnknown = true
-    const { error } = await getSupabaseBrowserClient().rpc('save_school_exam_import', { bundle, reviewing: true })
+    const { error } = await runImportSaveOperation('review RPC', SAVE_UNCONFIRMED_MESSAGE, () =>
+      getSupabaseBrowserClient().rpc('save_school_exam_import', { bundle, reviewing: true }),
+    )
     if (error) {
-      commitUnknown = !/^[0-9A-Z]{5}$/.test(error.code) || error.code.startsWith('08')
-      throw new Error(`Không thể xác nhận đã lưu kết quả duyệt: ${error.message}`)
+      console.error('Exam import save review RPC failed:', error)
+      commitUnknown = !isDefiniteImportSaveFailure(error.code)
+      throw new Error(commitUnknown
+        ? SAVE_UNCONFIRMED_MESSAGE
+        : 'Không thể lưu kết quả duyệt. Hãy thử lại hoặc liên hệ quản trị viên.')
     }
   } catch (error) {
-    if (!commitUnknown) await cleanupFailedUpload(paths, error)
+    if (!commitUnknown) await cleanupFailedUpload(paths)
     throw error
   }
 }
@@ -870,19 +885,43 @@ function buildSectionRows(examId: string, questions: AdminImportQuestion[]) {
     .filter((section) => section !== null)
 }
 
-async function uploadImportObject(path: string, body: Blob, contentType: string, paths: string[]) {
-  const bucket = getSupabaseBrowserClient().storage.from(STORAGE_BUCKET)
-  paths.push(path)
-  const { error } = await bucket.upload(path, body, { cacheControl: '3600', contentType, upsert: false })
-  if (error) throw new Error(buildStorageUploadErrorMessage(path, error.message))
-  return bucket.getPublicUrl(path).data.publicUrl
+function isDefiniteImportSaveFailure(code: unknown) {
+  return typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code) && !code.startsWith('08')
 }
 
-async function cleanupFailedUpload(paths: string[], failure: unknown) {
+async function runImportSaveOperation<T>(operation: string, message: string, run: () => PromiseLike<T>) {
+  try {
+    return await run()
+  } catch (error) {
+    console.error(`Exam import save ${operation} failed:`, error)
+    throw new Error(message, { cause: error })
+  }
+}
+
+async function uploadImportObject(path: string, body: Blob, contentType: string, paths: string[]) {
+  return runImportSaveOperation(
+    'Storage upload',
+    'Không thể tải tệp đề thi lên. Hãy kiểm tra kết nối hoặc liên hệ quản trị viên.',
+    async () => {
+      const bucket = getSupabaseBrowserClient().storage.from(STORAGE_BUCKET)
+      paths.push(path)
+      const { error } = await bucket.upload(path, body, { cacheControl: '3600', contentType, upsert: false })
+      if (error) throw error
+      return bucket.getPublicUrl(path).data.publicUrl
+    },
+  )
+}
+
+async function cleanupFailedUpload(paths: string[]) {
   if (!paths.length) return
-  const bucket = getSupabaseBrowserClient().storage.from(STORAGE_BUCKET)
-  const { error } = await bucket.remove(paths)
-  if (error) throw new Error(`${failure instanceof Error ? failure.message : 'Lưu thất bại.'} Không thể dọn tệp trong Storage: ${error.message}`)
+  await runImportSaveOperation(
+    'Storage cleanup',
+    'Không thể dọn các tệp đã tải lên sau khi lưu thất bại. Hãy liên hệ quản trị viên trước khi thử lại.',
+    async () => {
+      const { error } = await getSupabaseBrowserClient().storage.from(STORAGE_BUCKET).remove(paths)
+      if (error) throw error
+    },
+  )
 }
 
 async function uploadQuestionAssets(prefix: string, questions: AdminImportQuestion[], paths: string[]) {
@@ -904,16 +943,6 @@ async function uploadQuestionAssets(prefix: string, questions: AdminImportQuesti
   }
   return uploaded
 }
-
-function buildStorageUploadErrorMessage(target: string, message: string) {
-  if (message.toLowerCase().includes('bucket not found')) {
-    return `Không thể tải ${target}: bucket "${STORAGE_BUCKET}" chưa tồn tại. Hãy chạy web-app/supabase/setup_school_exam_storage_bucket.sql trong Supabase SQL Editor.`
-  }
-
-  return `Không thể tải ${target} lên Storage: ${message}`
-}
-
-
 
 function dataUrlToBlob(dataUrl: string) {
   const [metadata, base64Data] = dataUrl.split(',')
