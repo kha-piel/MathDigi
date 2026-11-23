@@ -94,7 +94,7 @@ export function DashboardLayout() {
               className="bg-gradient-to-r from-indigo-600 to-blue-600 bg-clip-text text-lg font-extrabold tracking-tight text-transparent"
               to="/home"
             >
-              THPTQG AI
+              UNIGO
             </NavLink>
 
             <button
@@ -114,7 +114,7 @@ export function DashboardLayout() {
 
           {!isFullScreenMode && isMobileMenuOpen ? (
             <div
-              className="fixed inset-0 z-30 bg-slate-950/30 md:hidden"
+              className="fixed inset-0 z-30 flex justify-start bg-slate-950/30 md:hidden"
               onClick={() => setIsMobileMenuOpen(false)}
             >
               <aside
@@ -171,7 +171,7 @@ function SidebarContent({
           className="inline-block bg-gradient-to-r from-indigo-600 to-blue-600 bg-clip-text text-2xl font-black tracking-tight text-transparent"
           to="/home"
         >
-          THPTQG AI
+          UNIGO
         </NavLink>
       </div>
 
